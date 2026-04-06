@@ -1,0 +1,47 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "printer-middleware"
+version = "1.0.0"
+description = "Enterprise-grade printer middleware system with async processing, persistent storage, and real-time monitoring"
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.8"
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "Intended Audience :: System Administrators",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Topic :: System :: Networking",
+    "Topic :: System :: Systems Administration"
+]
+dependencies = [
+    "flask>=2.0.0",
+    "waitress>=2.1.0",
+    "websockets>=10.0",
+    "pywin32>=306; sys_platform == 'win32'"
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/printer-middleware"
+Repository = "https://github.com/yourusername/printer-middleware"
+Issues = "https://github.com/yourusername/printer-middleware/issues"
+Changelog = "https://github.com/yourusername/printer-middleware/blob/main/CHANGELOG.md"
+
+[project.scripts]
+printer-middleware = "main:main"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["app*"]
+
+[tool.setuptools.package-data]
+app = ["templates/*", "static/*"]

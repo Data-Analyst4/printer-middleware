@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Printer Middleware Dashboard</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #ddd; border-radius: 5px; }
+        .status-connected { color: green; }
+        .status-disconnected { color: red; }
+        .status-queued { color: orange; }
+        .status-processing { color: blue; }
+        .status-completed { color: green; }
+        .status-failed { color: red; }
+        table { width: 100%; border-collapse: collapse; }
+        th, td { padding: 8px; text-align: left; border-bottom: 1px solid #ddd; }
+        th { background-color: #f2f2f2; }
+        .refresh-btn { background: #007bff; color: white; border: none; padding: 10px 15px; border-radius: 5px; cursor: pointer; }
+        .refresh-btn:hover { background: #0056b3; }
+    </style>
+</head>
+<body>
+    <h1>🖨️ Printer Middleware Dashboard</h1>
+
+    <button class="refresh-btn" onclick="loadAllData()">🔄 Refresh All</button>
+
+    <div class="section">
+        <h2>📊 System Metrics</h2>
+        <div id="metrics">Loading...</div>
+    </div>
+
+    <div class="section">
+        <h2>🖨️ Printer Status</h2>
+        <table id="printers-table">
+            <thead>
+                <tr>
+                    <th>Printer ID</th>
+                    <th>IP Address</th>
+                    <th>Port</th>
+                    <th>Connection Status</th>
+                    <th>Queue Size</th>
+                </tr>
+            </thead>
+            <tbody id="printers-body">
+                <tr><td colspan="5">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
+        <h2>📋 Recent Jobs</h2>
+        <table id="jobs-table">
+            <thead>
+                <tr>
+                    <th>Job ID</th>
+                    <th>Printer ID</th>
+                    <th>Status</th>
+                    <th>Priority</th>
+                    <th>Created At</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="jobs-body">
+                <tr><td colspan="6">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <script>
+        let autoRefreshInterval;
+
+        function startAutoRefresh() {
+            autoRefreshInterval = setInterval(loadAllData, 3000); // Refresh every 3 seconds
+        }
+
+        function stopAutoRefresh() {
+            if (autoRefreshInterval) {
+                clearInterval(autoRefreshInterval);
+            }
+        }
+
+        async function loadMetrics() {
+            try {
+                const response = await fetch('/metrics');
+                const data = await response.json();
+                document.getElementById('metrics').innerHTML = `
+                    <p><strong>Total Jobs:</strong> ${data.total_jobs}</p>
+                    <p><strong>Queued:</strong> <span class="status-queued">${data.queued_jobs}</span></p>
+                    <p><strong>Processing:</strong> <span class="status-processing">${data.processing_jobs}</span></p>
+                    <p><strong>Completed:</strong> <span class="status-completed">${data.completed_jobs}</span></p>
+                    <p><strong>Failed:</strong> <span class="status-failed">${data.failed_jobs}</span></p>
+                `;
+            } catch (error) {
+                document.getElementById('metrics').innerHTML = '<p class="status-failed">Error loading metrics</p>';
+            }
+        }
+
+        async function loadPrinters() {
+            try {
+                const response = await fetch('/printers');
+                const printers = await response.json();
+                const tbody = document.getElementById('printers-body');
+
+                if (Object.keys(printers).length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="5">No printers registered</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = Object.entries(printers).map(([id, printer]) => `
+                    <tr>
+                        <td>${id}</td>
+                        <td>${printer.ip}</td>
+                        <td>${printer.port}</td>
+                        <td class="${printer.connection_status === 'connected' ? 'status-connected' : 'status-disconnected'}">
+                            ${printer.connection_status}
+                        </td>
+                        <td>${printer.queue_size}</td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('printers-body').innerHTML = '<tr><td colspan="5" class="status-failed">Error loading printers</td></tr>';
+            }
+        }
+
+        async function loadJobs() {
+            try {
+                const response = await fetch('/jobs');
+                const data = await response.json();
+                const jobs = data.jobs.slice(-10); // Show last 10 jobs
+                const tbody = document.getElementById('jobs-body');
+
+                if (jobs.length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No jobs found</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = jobs.reverse().map(job => `
+                    <tr>
+                        <td>${job.job_id.substring(0, 8)}...</td>
+                        <td>${job.printer_id}</td>
+                        <td class="status-${job.status}">${job.status}</td>
+                        <td>${job.priority}</td>
+                        <td>${new Date(job.created_at).toLocaleString()}</td>
+                        <td><button onclick="viewJobDetails('${job.job_id}')">View Details</button></td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('jobs-body').innerHTML = '<tr><td colspan="6" class="status-failed">Error loading jobs</td></tr>';
+            }
+        }
+
+        async function viewJobDetails(jobId) {
+            try {
+                const response = await fetch(`/job/${jobId}`);
+                const job = await response.json();
+                alert(`Job Details:\n\nID: ${job.job_id}\nStatus: ${job.status}\nPrinter: ${job.printer_id}\nResponses: ${job.responses.join(', ')}\nError: ${job.error || 'None'}`);
+            } catch (error) {
+                alert('Error loading job details');
+            }
+        }
+
+        async function loadAllData() {
+            await Promise.all([
+                loadMetrics(),
+                loadPrinters(),
+                loadJobs()
+            ]);
+        }
+
+        // Initial load and start auto-refresh
+        loadAllData();
+        startAutoRefresh();
+
+        // Stop auto-refresh when page is not visible
+        document.addEventListener('visibilitychange', () => {
+            if (document.hidden) {
+                stopAutoRefresh();
+            } else {
+                loadAllData();
+                startAutoRefresh();
+            }
+        });
+    </script>
+</body>
+</html>

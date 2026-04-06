@@ -1,0 +1,323 @@
+{
+  "info": {
+    "name": "Printer Middleware API",
+    "description": "Production-grade printer middleware with job tracking and priority queues",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health & Status",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/health",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["health"]
+            },
+            "description": "Check if the middleware is running and healthy"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Metrics",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/metrics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["metrics"]
+            },
+            "description": "Get system metrics (total jobs, queued, processing, completed, failed)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Printers",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/printers",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["printers"]
+            },
+            "description": "Get all registered printers with connection status and queue size"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Jobs",
+      "item": [
+        {
+          "name": "Submit Single Command (Normal Priority)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer_id\": \"P1\",\n  \"printer\": {\n    \"ip\": \"192.168.1.100\",\n    \"port\": 9100\n  },\n  \"command\": {\n    \"command\": \"PRINT\",\n    \"template\": \"label_template\",\n    \"data\": {\n      \"field\": \"value\"\n    }\n  },\n  \"priority\": \"normal\"\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Submit a single print command with normal priority"
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Single Command (High Priority)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer_id\": \"P1\",\n  \"printer\": {\n    \"ip\": \"192.168.1.100\",\n    \"port\": 9100\n  },\n  \"command\": {\n    \"command\": \"URGENT_PRINT\",\n    \"data\": {\n      \"item\": \"urgent\"\n    }\n  },\n  \"priority\": \"high\"\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Submit a high priority print command (processed first)"
+          },
+          "response": []
+        },
+        {
+          "name": "Submit Multiple Commands",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer_id\": \"P1\",\n  \"printer\": {\n    \"ip\": \"192.168.1.100\",\n    \"port\": 9100\n  },\n  \"commands\": [\n    {\n      \"command\": \"STAR\",\n      \"templatename\": \"DEMO\",\n      \"startpage\": \"1\",\n      \"endpage\": \"1\",\n      \"loop\": \"false\"\n    },\n    {\n      \"command\": \"DATA\",\n      \"data\": {\n        \"POD1\": \"123\",\n        \"POD2\": \"456\"\n      }\n    }\n  ],\n  \"priority\": \"normal\"\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Submit multiple commands in a single job (will execute in order)"
+          },
+          "response": []
+        },
+        {
+          "name": "Get All Jobs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/jobs",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["jobs"]
+            },
+            "description": "Get all jobs submitted to the system"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Job Status",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/job/{{job_id}}",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["job", "{{job_id}}"]
+            },
+            "description": "Get status and results of a specific job (replace {{job_id}} with actual job ID)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Batch Operations",
+      "item": [
+        {
+          "name": "Submit 5 Jobs to Different Printers",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "# Submit 5 jobs in a loop\n# In a terminal, run:\nfor i in {1..5}; do\n  curl -X POST http://localhost:5000/print \\\n    -H \"Content-Type: application/json\" \\\n    -d \"{\n      \\\"printer_id\\\": \\\"P$(($i % 2 + 1))\\\",\n      \\\"printer\\\": {\n        \\\"ip\\\": \\\"192.168.1.10$i\\\",\n        \\\"port\\\": 9100\n      },\n      \\\"command\\\": {\n        \\\"command\\\": \\\"PRINT\\\",\n        \\\"item\\\": \\\"batch_item_$i\\\"\n      },\n      \\\"priority\\\": \\\"$([ $i -eq 1 ] && echo 'high' || echo 'normal')\\\"\n    }\"\ndone\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Submit multiple jobs in batch (see description for bash loop)"
+          },
+          "response": []
+        },
+        {
+          "name": "Sample: Load Test (Monitor Metrics)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/metrics",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["metrics"]
+            },
+            "description": "After submitting batch jobs, check metrics to see job distribution (queued, processing, completed, failed)"
+          },
+          "response": []
+        }
+      ]
+    },
+    {
+      "name": "Error Cases",
+      "item": [
+        {
+          "name": "Missing Printer ID (Error)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer\": {\n    \"ip\": \"192.168.1.100\",\n    \"port\": 9100\n  },\n  \"command\": {\n    \"command\": \"PRINT\"\n  }\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Should return error: Missing printer_id"
+          },
+          "response": []
+        },
+        {
+          "name": "Invalid IP (Error)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer_id\": \"P1\",\n  \"printer\": {\n    \"ip\": \"invalid-ip\",\n    \"port\": 9100\n  },\n  \"command\": {\n    \"command\": \"PRINT\"\n  }\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Should return error: Invalid IP"
+          },
+          "response": []
+        },
+        {
+          "name": "Invalid Priority (Error)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"printer_id\": \"P1\",\n  \"printer\": {\n    \"ip\": \"192.168.1.100\",\n    \"port\": 9100\n  },\n  \"command\": {\n    \"command\": \"PRINT\"\n  },\n  \"priority\": \"super_high\"\n}\n"
+            },
+            "url": {
+              "raw": "http://localhost:5000/print",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["print"]
+            },
+            "description": "Should return error: Invalid priority (must be 'high' or 'normal')"
+          },
+          "response": []
+        },
+        {
+          "name": "Get Non-existent Job (Error)",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "http://localhost:5000/job/non-existent-job-id",
+              "protocol": "http",
+              "host": ["localhost"],
+              "port": "5000",
+              "path": ["job", "non-existent-job-id"]
+            },
+            "description": "Should return error: Job not found"
+          },
+          "response": []
+        }
+      ]
+    }
+  ],
+  "variable": [
+    {
+      "key": "job_id",
+      "value": "",
+      "type": "string"
+    }
+  ]
+}

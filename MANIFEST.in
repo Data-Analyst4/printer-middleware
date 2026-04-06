@@ -1,0 +1,13 @@
+include README.md
+include CHANGELOG.md
+include LICENSE
+include requirements.txt
+include pyproject.toml
+include config/printers.json
+include dashboard/index.html
+recursive-include app *.py
+recursive-include docs *.md
+global-exclude *.pyc
+global-exclude __pycache__
+global-exclude *.log
+global-exclude app/db/jobs.db
