@@ -38,6 +38,8 @@ Changelog = "https://github.com/yourusername/printer-middleware/blob/main/CHANGE
 
 [project.scripts]
 printer-middleware = "main:main"
+version-manager = "scripts.version_manager:main"
+setup-github = "scripts.setup_github:main"
 
 [tool.setuptools.packages.find]
 where = ["."]
