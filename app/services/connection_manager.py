@@ -1,92 +1,78 @@
+"""TCP JSON connection manager for printers.
+
+The printers speak raw TCP and expect JSON payloads; we send the bytes and
+return the response (parsed as JSON when possible, otherwise text). A per-call
+socket is used to avoid stale connections.
+"""
+
+import json
+import os
 import socket
 import threading
-import time
+from typing import Any, Dict, Optional
+
 from app.utils.logger import log
 
+CONNECT_TIMEOUT = float(os.getenv("PRINTER_CONNECT_TIMEOUT", "5"))
+READ_TIMEOUT = float(os.getenv("PRINTER_READ_TIMEOUT", "2"))
+FIRE_AND_FORGET = os.getenv("PRINTER_FIRE_AND_FORGET", "false").lower() == "true"
+
+
 class ConnectionManager:
-    def __init__(self, printer_id, ip, port):
+    def __init__(self, printer_id: str, ip: str, port: int):
         self.printer_id = printer_id
         self.ip = ip
         self.port = port
-        self.socket = None
-        self.connected = False
+        self.connected = False  # reflects last successful call
         self.lock = threading.Lock()
-        self.keep_alive = True
-        self.thread = threading.Thread(target=self._maintain_connection, daemon=True)
-        self.thread.start()
 
-    def _maintain_connection(self):
-        while self.keep_alive:
-            try:
-                if not self.connected:
-                    self._connect()
-                time.sleep(30)  # Check connection every 30 seconds
-            except Exception as e:
-                log(f"Connection maintenance error for {self.printer_id}: {e}")
-                self.connected = False
-                time.sleep(5)  # Retry after 5 seconds
+    def _open_socket(self) -> socket.socket:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(CONNECT_TIMEOUT)
+        sock.connect((self.ip, self.port))
+        self.connected = True
+        return sock
 
-    def _connect(self):
-        try:
-            self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.socket.settimeout(10.0)
-            self.socket.connect((self.ip, self.port))
-            self.connected = True
-            log(f"Connected to printer {self.printer_id} at {self.ip}:{self.port}")
-        except Exception as e:
-            self.connected = False
-            log(f"Failed to connect to printer {self.printer_id}: {e}")
-            raise
+    def send_command(self, command_dict: Dict[str, Any]) -> Optional[Any]:
+        """Send one command and return printer response (JSON or text).
 
-    def send_command(self, command_dict):
+        Raises socket errors on failure; caller decides retry policy.
+        """
         with self.lock:
-            if not self.connected:
-                self._connect()
-
             try:
-                import json
-                json_payload = json.dumps(command_dict).encode('utf-8')
-                self.socket.sendall(json_payload)
+                with self._open_socket() as sock:
+                    payload = json.dumps(command_dict).encode("utf-8")
+                    sock.sendall(payload)
 
-                # Try to read response
-                response = None
-                try:
-                    self.socket.settimeout(2.0)  # Short timeout for response
-                    response_data = self.socket.recv(1024)
-                    if response_data:
-                        try:
-                        response_text = response_data.decode('utf-8')
-                        try:
-                            import json as _json
-                            response = _json.loads(response_text)
-                        except Exception:
-                            response = response_text
+                    if FIRE_AND_FORGET:
+                        return None
+
+                    sock.settimeout(READ_TIMEOUT)
+                    try:
+                        data = sock.recv(4096)
+                    except socket.timeout:
+                        log(f"Read timeout from printer {self.printer_id}")
+                        return None
+
+                    if not data:
+                        return None
+
+                    text = data.decode("utf-8", errors="replace")
+                    try:
+                        return json.loads(text)
                     except Exception:
-
-                return response
-
+                        return text
             except Exception as e:
-                log(f"Send error for {self.printer_id}: {e}")
                 self.connected = False
+                log(f"Send error for {self.printer_id}: {e}")
                 raise
 
     def close(self):
-        self.keep_alive = False
-        if self.socket:
-            try:
-                self.socket.close()
-            except:
-                pass
+        # No persistent socket to close in the current design
         self.connected = False
 
-    def update_target(self, ip, port):
+    def update_target(self, ip: str, port: int):
         with self.lock:
             self.ip = ip
             self.port = port
             self.connected = False
-            if self.socket:
-                try:
-                    self.socket.close()
-                except:
-                    pass
-                self.socket = None

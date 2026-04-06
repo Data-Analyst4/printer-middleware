@@ -5,14 +5,21 @@ Printer Middleware - Enterprise-grade printer management system
 
 import sys
 import argparse
+import os
 from flask import Flask
+from flask_cors import CORS
+from dotenv import load_dotenv
 from app.api.routes import api
 from app.version import get_version, get_version_info
 from app.utils.logger import log
 
 def create_app():
     """Create and configure the Flask application"""
+    load_dotenv()
+
     app = Flask(__name__)
+    cors_origins = os.getenv("CORS_ORIGINS", "*")
+    CORS(app, origins=cors_origins)
 
     # Register blueprints
     app.register_blueprint(api)

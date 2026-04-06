@@ -86,75 +86,17 @@ def handle_print_request(data):
     register_printer(printer_id, ip, port)
     save_printers()
 
-    # Create job
+    # Create job and enqueue for background processing
     job = JOB_MANAGER.create_job(printer_id, commands, priority)
-    connection = PRINTERS[printer_id]["connection"]
-
-    # Always attempt immediate send - no queuing
-    try:
-        JOB_MANAGER.update_job_status(job.job_id, JobStatus.PROCESSING)
-        log(f"Processing job {job.job_id} immediately for printer {printer_id}")
-
-        responses = []
-        error = None
-        for cmd in job.commands:
-            response = None
-            for attempt in range(3):
-                try:
-                    response = connection.send_command(cmd)
-                    responses.append(response)  # Always append, even if None
-                    log(f"Command sent successfully for job {job.job_id}, attempt {attempt + 1}")
-                    break
-                except Exception as e:
-                    log(f"Attempt {attempt + 1} failed for job {job.job_id}: {e}")
-                    if attempt < 2:
-                        time.sleep(1)
-                    else:
-                        error = str(e)
-
-            if error:
-                break
-
-        if error:
-            JOB_MANAGER.update_job_status(job.job_id, JobStatus.FAILED, error)
-            log(f"Job {job.job_id} failed: {error}")
-            return {
-                "success": False,
-                "job_id": job.job_id,
-                "status": job.status.value,
-                "error": error,
-                "responses": responses
-            }
-
-        JOB_MANAGER.update_job_status(job.job_id, JobStatus.COMPLETED)
-        for resp in responses:
-            JOB_MANAGER.update_job_status(job.job_id, JobStatus.COMPLETED, response=resp)
-        log(f"Job {job.job_id} completed successfully")
-
-        return {
-            "success": True,
-            "job_id": job.job_id,
-            "status": job.status.value,
-            "responses": responses,
-            "printer_responses": responses,
-            "message": "Job sent and response received"
-        }
-    except Exception as e:
-        log(f"Immediate send failed for job {job.job_id}: {e}")
-        JOB_MANAGER.update_job_status(job.job_id, JobStatus.FAILED, str(e))
-        return {
-            "success": False,
-            "job_id": job.job_id,
-            "status": job.status.value,
-            "error": str(e),
-            "responses": []
-        }
+    priority_num = 1 if priority.lower() == "high" else 2
+    PRINTERS[printer_id]["queue"].put((priority_num, next(_counter), job))
+    log(f"Queued job {job.job_id} for printer {printer_id} with priority {priority}")
 
     return {
         "success": True,
         "job_id": job.job_id,
         "status": job.status.value,
-        "message": "Printer not currently connected; job queued for delivery"
+        "message": "Job queued; poll /job/<job_id> for status"
     }
 
 def get_all_printers():

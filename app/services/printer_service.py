@@ -1,31 +1,29 @@
-import socket
+"""Utility for one-off TCP printer calls used by tests/examples."""
+
 import json
+import socket
+
 
 def send_printer_command(ip, port, command_dict):
-    json_payload = json.dumps(command_dict).encode('utf-8')
-    response = None
-
+    payload = json.dumps(command_dict).encode("utf-8")
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.settimeout(5.0)
-        try:
-            sock.connect((ip, port))
-            sock.sendall(json_payload)
+        sock.connect((ip, port))
+        sock.sendall(payload)
 
-            try:
-                response_data = sock.recv(1024)
-                if response_data:
-                    try:
-                        response = response_data.decode('utf-8')
-                    except:
-                        response = str(response_data)
-                    print(f"Printer response: {response}")
-                    return response
-            except socket.timeout:
-                print("Socket timeout - no response from printer")
-                return None
-            except Exception as e:
-                print(f"Error reading response: {e}")
-                return None
-        except Exception as e:
-            print(f"Connection error: {e}")
-            raise
+        try:
+            resp = sock.recv(4096)
+        except socket.timeout:
+            print("Printer read timeout")
+            return None
+
+        if not resp:
+            return None
+
+        text = resp.decode("utf-8", errors="replace")
+        try:
+            parsed = json.loads(text)
+        except Exception:
+            parsed = text
+        print(f"Printer response: {parsed}")
+        return parsed
