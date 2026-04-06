@@ -1,3 +1,6 @@
+import time
+from app.services.printer_service import send_printer_command
+
 def test_print(ip, port):
     # Step 1: Template
     template_cmd = {
