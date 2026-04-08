@@ -55,6 +55,10 @@ class DatabaseManager:
         conn.row_factory = sqlite3.Row
         try:
             yield conn
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
         finally:
             conn.close()
 
@@ -71,37 +75,34 @@ class DatabaseManager:
             row = conn.execute('SELECT * FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
             return dict(row) if row else None
 
-    def update_job_status(self, job_id, status, error=None, response=None, retry_count=None, next_retry_at=None):
+    def update_job_status(self, job_id, status, error=None, responses=None, retry_count=None, next_retry_at=None):
         now = datetime.now().isoformat()
-        updates = ['status = ?', 'updated_at = ?']
-        params = [status.value if hasattr(status, 'value') else status, now]
-
-        if error is not None:
-            updates.append('error = ?')
-            params.append(error)
-
-        if response is not None:
-            updates.append('responses = json_set(responses, ?, ?)')
-            # For simplicity, we'll append to responses array
-            current_responses = self.get_job(job_id).get('responses', '[]')
-            responses_list = json.loads(current_responses)
-            responses_list.append(response)
-            params.extend(['$[-1]', json.dumps(responses_list)])
-
-        if retry_count is not None:
-            updates.append('retry_count = ?')
-            params.append(retry_count)
-
-        if next_retry_at is not None:
-            updates.append('next_retry_at = ?')
-            params.append(next_retry_at)
-
-        params.append(job_id)
-
         with self.get_connection() as conn:
-            conn.execute(f'''
-                UPDATE jobs SET {', '.join(updates)} WHERE job_id = ?
-            ''', params)
+            row = conn.execute('SELECT responses FROM jobs WHERE job_id = ?', (job_id,)).fetchone()
+            current_responses = json.loads(row['responses'] or '[]') if row else []
+
+            if responses is not None:
+                # replace with provided list
+                current_responses = responses
+
+            conn.execute('''
+                UPDATE jobs
+                SET status = ?,
+                    updated_at = ?,
+                    error = ?,
+                    responses = ?,
+                    retry_count = COALESCE(?, retry_count),
+                    next_retry_at = COALESCE(?, next_retry_at)
+                WHERE job_id = ?
+            ''', (
+                status.value if hasattr(status, 'value') else status,
+                now,
+                error,
+                json.dumps(current_responses),
+                retry_count,
+                next_retry_at,
+                job_id
+            ))
 
     def get_pending_jobs(self, printer_id=None, limit=10):
         query = '''

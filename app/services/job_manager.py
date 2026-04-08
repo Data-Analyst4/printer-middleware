@@ -21,9 +21,9 @@ class JobManager:
             row = self.db.get_job(job_id)
             return Job.from_db_row(row) if row else None
 
-    def update_job_status(self, job_id, status, error=None, response=None, retry_count=None, next_retry_at=None):
+    def update_job_status(self, job_id, status, error=None, responses=None, retry_count=None, next_retry_at=None):
         with self.lock:
-            self.db.update_job_status(job_id, status, error, response, retry_count, next_retry_at)
+            self.db.update_job_status(job_id, status, error, responses, retry_count, next_retry_at)
             log(f"Updated job {job_id} status to {status.value if hasattr(status, 'value') else status}")
 
     def get_all_jobs(self):

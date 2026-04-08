@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.1.0] - 2026-04-08
+
+### Added
+- Direct synchronous printer command flow for web app integrations
+- Printer protocol helpers for command normalization and payload serialization
+- Cloudflare tunnel scripts for HTTPS exposure of the local middleware
+- Windows service install scripts for the middleware and cloudflared
+- Protocol-focused test coverage for command extraction and payload formatting
+
+### Changed
+- Improved printer response parsing and structured error reporting
+- Improved connection handling to capture transport and printer-level failures
+- Updated release metadata for the 1.1.0 web integration milestone
+
 ## [1.0.0] - 2024-12-19
 
 ### Added
@@ -50,7 +64,7 @@ This project uses [Semantic Versioning](https://semver.org/):
 ### Release Process
 1. Update version in `app/version.py` and `pyproject.toml`
 2. Update CHANGELOG.md with new version details
-3. Create git tag: `git tag -a v1.0.0 -m "Version 1.0.0"`
+3. Create git tag: `git tag -a v1.1.0 -m "Version 1.1.0"`
 4. Push tags: `git push origin --tags`
 5. Create GitHub release with release notes
 
@@ -59,10 +73,10 @@ This project uses [Semantic Versioning](https://semver.org/):
 #### Via Git Tags
 ```bash
 # Download specific version
-git clone --branch v1.0.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
 
 # Or checkout specific version
-git checkout tags/v1.0.0
+git checkout tags/v1.1.0
 ```
 
 #### Via GitHub Releases
@@ -70,5 +84,5 @@ Download ZIP files from [GitHub Releases](https://github.com/yourusername/printe
 
 #### Via pip (if published)
 ```bash
-pip install printer-middleware==1.0.0
+pip install printer-middleware==1.1.0
 ```

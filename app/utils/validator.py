@@ -1,34 +1,31 @@
 import re
 
+from app.services.printer_protocol import extract_single_command
+
+
 def validate_request(data):
+    if not isinstance(data, dict):
+        return False, "Invalid JSON payload"
+
     if "printer_id" not in data:
         return False, "Missing printer_id"
 
-    if "printer" not in data:
+    if "printer" not in data or not isinstance(data["printer"], dict):
         return False, "Missing printer info"
 
-    ip = data["printer"].get("ip")
-    port = data["printer"].get("port")
+    ip = data["printer"].get("ip") if data.get("printer") else None
+    port = data["printer"].get("port") if data.get("printer") else None
 
     if not ip or not re.match(r"^(?:[0-9]{1,3}\.){3}[0-9]{1,3}$", ip):
         return False, "Invalid IP"
 
-    if not str(port).isdigit():
+    if port is None or not str(port).isdigit():
         return False, "Invalid Port"
 
-    # Check for either "command" (single) or "commands" (list)
-    if "command" not in data and "commands" not in data:
-        return False, "Missing command or commands"
-
-    if "command" in data and "commands" in data:
-        return False, "Cannot have both command and commands"
-
-    command = data.get("command") or data.get("commands")
-    if isinstance(command, list):
-        if not all(isinstance(c, dict) for c in command):
-            return False, "Commands must be a list of objects"
-    elif not isinstance(command, dict):
-        return False, "Command must be an object or list of objects"
+    try:
+        extract_single_command(data)
+    except ValueError as exc:
+        return False, str(exc)
 
     # Validate priority if provided
     priority = data.get("priority")

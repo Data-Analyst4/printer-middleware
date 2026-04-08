@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "printer-middleware"
-version = "1.0.0"
+version = "1.1.0"
 description = "Enterprise-grade printer middleware system with async processing, persistent storage, and real-time monitoring"
 readme = "README.md"
 license = {text = "MIT"}

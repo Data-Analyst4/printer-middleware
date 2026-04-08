@@ -53,13 +53,13 @@ def main():
     print("\n🎉 GitHub repository setup complete!")
     print("\nNext steps:")
     print("1. Go to your GitHub repository: " + repo_url.replace('.git', ''))
-    print("2. Create a release for v1.0.0:")
+    print("2. Create a release for v1.1.0:")
     print("   - Go to Releases → Create a new release")
-    print("   - Tag: v1.0.0")
-    print("   - Title: Version 1.0.0 - Enterprise-grade release")
+    print("   - Tag: v1.1.0")
+    print("   - Title: Version 1.1.0 - Web integration release")
     print("   - Copy description from CHANGELOG.md")
     print("3. Users can now download specific versions using:")
-    print("   git clone --branch v1.0.0 " + repo_url)
+    print("   git clone --branch v1.1.0 " + repo_url)
     print("   # or download ZIP from releases")
 
 if __name__ == "__main__":

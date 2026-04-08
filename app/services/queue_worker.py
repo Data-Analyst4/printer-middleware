@@ -18,16 +18,56 @@ def printer_worker(printer, job_manager):
 
             try:
                 # Send each command with retry logic
-                for cmd in job.commands:
+                for idx, cmd in enumerate(job.commands):
                     response = None
                     for attempt in range(3):  # 3 retry attempts
                         try:
                             response = printer["connection"].send_command(cmd)
-                            if response:
-                                responses.append(response)
-                            log(f"Command sent successfully for job {job.job_id}, attempt {attempt + 1}")
-                            break
+                            attempt_record = {
+                                "index": idx,
+                                "attempt": attempt + 1,
+                                "command": cmd,
+                                "ok": response.get("ok", False),
+                                "reason": response.get("reason"),
+                                "response_command": response.get("response_command"),
+                                "response_status": response.get("response_status"),
+                                "protocol_error_code": response.get("protocol_error_code"),
+                                "protocol_error_description": response.get("protocol_error_description"),
+                                "error_type": response.get("error_type"),
+                                "raw_response": response.get("raw_response"),
+                                "response": response.get("response"),
+                                "details": response
+                            }
+                            responses.append(attempt_record)
+
+                            if response.get("ok", False):
+                                log(
+                                    f"Command acknowledged for job {job.job_id}, "
+                                    f"attempt {attempt + 1}, "
+                                    f"printer_response={response.get('response_command') or 'n/a'}"
+                                )
+                                break
+
+                            reason = response.get("reason") or "Unsuccessful printer response"
+                            log(
+                                f"Attempt {attempt + 1} received unsuccessful response for job {job.job_id}: {reason}"
+                            )
+
+                            if attempt < 2:
+                                time.sleep(1)
+                            else:
+                                error = reason
                         except Exception as e:
+                            responses.append({
+                                "index": idx,
+                                "attempt": attempt + 1,
+                                "command": cmd,
+                                "ok": False,
+                                "reason": str(e),
+                                "error_type": "transport_exception",
+                                "raw_response": None,
+                                "response": None
+                            })
                             log(f"Attempt {attempt + 1} failed for job {job.job_id}: {e}")
                             if attempt < 2:  # Wait before retry (except last attempt)
                                 time.sleep(1)
@@ -41,19 +81,15 @@ def printer_worker(printer, job_manager):
 
                 # Update final job status
                 if error:
-                    job_manager.update_job_status(job.job_id, JobStatus.FAILED, error)
+                    job_manager.update_job_status(job.job_id, JobStatus.FAILED, error=error, responses=responses)
                     log(f"Job {job.job_id} failed: {error}")
                 else:
-                    job_manager.update_job_status(job.job_id, JobStatus.COMPLETED)
+                    job_manager.update_job_status(job.job_id, JobStatus.COMPLETED, responses=responses)
                     log(f"Job {job.job_id} completed successfully")
-
-                # Add responses to job
-                for resp in responses:
-                    job_manager.update_job_status(job.job_id, JobStatus.COMPLETED, response=resp)
 
             except Exception as e:
                 error = str(e)
-                job_manager.update_job_status(job.job_id, JobStatus.FAILED, error)
+                job_manager.update_job_status(job.job_id, JobStatus.FAILED, error=error, responses=responses)
                 log(f"Unexpected error processing job {job.job_id}: {error}")
 
         except Exception as e:

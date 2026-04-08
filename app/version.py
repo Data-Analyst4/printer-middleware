@@ -2,11 +2,20 @@
 Printer Middleware - Enterprise-grade printer management system
 """
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # Version history
 VERSION_HISTORY = {
+    "1.1.0": {
+        "date": "2026-04-08",
+        "changes": [
+            "Added direct printer command send/response flow for web app use",
+            "Added printer protocol parsing and payload serialization helpers",
+            "Added Cloudflare tunnel and Windows service deployment scripts",
+            "Improved printer connection diagnostics and response reporting"
+        ]
+    },
     "1.0.0": {
         "date": "2024-12-19",
         "changes": [

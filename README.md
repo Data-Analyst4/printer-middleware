@@ -2,7 +2,7 @@
 
 **Enterprise-grade printer management system with async processing, persistent storage, and real-time monitoring**
 
-[![Version](https://img.shields.io/badge/version-1.0.0-blue.svg)](https://github.com/yourusername/printer-middleware/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/yourusername/printer-middleware/releases)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
@@ -37,16 +37,16 @@ pip install -r requirements.txt
 
 ```bash
 # Download specific version via git tags
-git clone --branch v1.0.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
 
 # Or download ZIP from GitHub releases
-# https://github.com/yourusername/printer-middleware/releases/tag/v1.0.0
+# https://github.com/yourusername/printer-middleware/releases/tag/v1.1.0
 ```
 
 ### Option 3: Install via pip (when published)
 
 ```bash
-pip install printer-middleware==1.0.0
+pip install printer-middleware==1.1.0
 ```
 
 ---
@@ -79,6 +79,9 @@ python main.py --debug
 # Production mode
 python main.py
 
+# Production with TLS (self-provided cert/key)
+python main.py --host 0.0.0.0 --port 5000 --cert /path/to/cert.pem --key /path/to/key.pem
+
 # Show version
 python main.py --version
 ```
@@ -88,6 +91,34 @@ Server starts at `http://0.0.0.0:5000`
 ### 3. Access Dashboard
 
 Open `http://localhost:5000` in your browser for the monitoring dashboard.
+
+---
+
+## 🌐 Expose over HTTPS
+
+### Option 1: Cloudflare Tunnel (no inbound ports)
+- Install cloudflared (Windows: `choco install cloudflared`).
+- Authenticate: `cloudflared tunnel login`
+- Create tunnel: `cloudflared tunnel create printer-middleware`
+- Route DNS: `cloudflared tunnel route dns printer-middleware print.example.com`
+- Copy `config/cloudflared/config.yml.example` to `%USERPROFILE%\.cloudflared\config.yml`.
+- Edit `%USERPROFILE%\.cloudflared\config.yml` and replace all placeholders:
+  - `tunnel` with your real tunnel UUID
+  - `credentials-file` with the JSON path created by `cloudflared tunnel create`
+  - `hostname` with your real DNS hostname
+- Run with preflight checks:
+  - `powershell -ExecutionPolicy Bypass -File scripts/run_tunnel.ps1`
+  - Optional override: `... -TunnelName printer-middleware`
+  - Optional custom config path: `... -ConfigPath C:\path\to\config.yml`
+- Your API is now at `https://print.example.com` (HTTPS), forwarded to `http://127.0.0.1:5000`.
+
+### Option 2: Reverse proxy (Nginx/Caddy/Traefik)
+- Terminate TLS with a real certificate (Let’s Encrypt) on port 443.
+- Proxy to `http://127.0.0.1:5000`.
+- Ensure CORS allows your web app origin (set `CORS_ORIGINS` env or configure proxy headers).
+
+### CORS
+- Set `CORS_ORIGINS=https://your-frontend-domain` (comma-separated for multiple) to allow browser calls.
 
 ---
 
@@ -149,7 +180,7 @@ curl http://localhost:5000/job/550e8400-e29b-41d4-a716-446655440000
 
 ## 🔄 Version Management
 
-### Current Version: v1.0.0
+### Current Version: v1.1.0
 
 This project uses [Semantic Versioning](https://semver.org/):
 
@@ -169,11 +200,11 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 git tag -l
 
 # Download specific version
-git clone --branch v1.0.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
 cd printer-middleware
 
 # Or checkout in existing repo
-git checkout tags/v1.0.0
+git checkout tags/v1.1.0
 ```
 
 #### Via GitHub Releases
@@ -183,7 +214,7 @@ git checkout tags/v1.0.0
 
 #### Via pip (when published to PyPI)
 ```bash
-pip install printer-middleware==1.0.0
+pip install printer-middleware==1.1.0
 ```
 
 ---
