@@ -46,6 +46,7 @@ echo   sc stop cloudflared
 echo   sc start cloudflared
 echo.
 echo Make sure your config file points to:
-echo   service: http://127.0.0.1:5000
+echo   service: http://127.0.0.1:5001
+echo Or use whichever local port your PrinterMiddleware service is running on.
 
 exit /b 0

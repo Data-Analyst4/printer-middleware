@@ -2,11 +2,21 @@
 Printer Middleware - Enterprise-grade printer management system
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # Version history
 VERSION_HISTORY = {
+    "1.2.0": {
+        "date": "2026-04-22",
+        "changes": [
+            "Added /test-print API suite with protocol-faithful printer simulation",
+            "Added simulator scenarios and per-printer simulator state controls",
+            "Added /logs/app.json and /logs/app.jsonl APIs for structured log querying",
+            "Added printer configuration upsert/update/delete management endpoints",
+            "Improved request validation and standardized validation error responses"
+        ]
+    },
     "1.1.0": {
         "date": "2026-04-08",
         "changes": [

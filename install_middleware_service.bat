@@ -15,20 +15,28 @@ if errorlevel 1 (
 
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%"
+set "WORK_DIR=%ROOT_DIR:~0,-1%"
 
 set "SERVICE_NAME=PrinterMiddleware"
 set "DISPLAY_NAME=Printer Middleware"
-set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
-set "APP_SCRIPT=%ROOT_DIR%main.py"
-set "APP_LOG=%ROOT_DIR%logs\service-output.log"
-set "APP_ERR=%ROOT_DIR%logs\service-error.log"
-set "LOCAL_NSSM=%ROOT_DIR%nssm.exe"
+set "PYTHON_EXE=%WORK_DIR%\.venv\Scripts\python.exe"
+set "APP_SCRIPT=%WORK_DIR%\main.py"
+set "APP_LOG=%WORK_DIR%\logs\service-output.log"
+set "APP_ERR=%WORK_DIR%\logs\service-error.log"
+set "LOCAL_NSSM=%WORK_DIR%\nssm.exe"
 set "NSSM_EXE=%LOCAL_NSSM%"
 
 if "%~1"=="" (
   if "%PORT%"=="" set "PORT=5000"
 ) else (
   set "PORT=%~1"
+)
+
+echo %PORT%| findstr /R "^[0-9][0-9]*$" >nul
+if errorlevel 1 (
+  echo [ERROR] Invalid port "%PORT%".
+  echo         Use a numeric port such as 5000 or 5001.
+  exit /b 1
 )
 
 if "%HOST%"=="" set "HOST=0.0.0.0"
@@ -55,7 +63,7 @@ if not exist "%APP_SCRIPT%" (
   exit /b 1
 )
 
-if not exist "%ROOT_DIR%logs" mkdir "%ROOT_DIR%logs"
+if not exist "%WORK_DIR%\logs" mkdir "%WORK_DIR%\logs"
 
 if exist "%LOCAL_NSSM%" goto have_nssm
 
@@ -109,7 +117,7 @@ if errorlevel 1 (
 echo [4/6] Configuring service settings...
 "%NSSM_EXE%" set "%SERVICE_NAME%" DisplayName "%DISPLAY_NAME%"
 "%NSSM_EXE%" set "%SERVICE_NAME%" Description "Printer middleware API for remote web apps and printer communication"
-"%NSSM_EXE%" set "%SERVICE_NAME%" AppDirectory "%ROOT_DIR%"
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppDirectory "%WORK_DIR%"
 "%NSSM_EXE%" set "%SERVICE_NAME%" Start SERVICE_AUTO_START
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppStdout "%APP_LOG%"
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppStderr "%APP_ERR%"

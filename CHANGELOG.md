@@ -5,6 +5,18 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-04-22
+
+### Added
+- `/test-print` endpoint family to emulate printer responses with `/print`-compatible payloads
+- Scenario-driven printer simulator (`auto`, `rsal_011`, `sysn_007`, `nyes`, `timeout`, `transport_closed`, `mixed`)
+- Structured log read endpoints: `/logs/app.json` and `/logs/app.jsonl`
+- Printer config management endpoints: create/update/delete printer definitions
+
+### Changed
+- Standardized validation error shape for simulator request failures
+- Improved compatibility fields in simulated command responses for protocol-level testing
+
 ## [1.1.0] - 2026-04-08
 
 ### Added
@@ -64,7 +76,7 @@ This project uses [Semantic Versioning](https://semver.org/):
 ### Release Process
 1. Update version in `app/version.py` and `pyproject.toml`
 2. Update CHANGELOG.md with new version details
-3. Create git tag: `git tag -a v1.1.0 -m "Version 1.1.0"`
+3. Create git tag: `git tag -a v1.2.0 -m "Version 1.2.0"`
 4. Push tags: `git push origin --tags`
 5. Create GitHub release with release notes
 
@@ -73,7 +85,7 @@ This project uses [Semantic Versioning](https://semver.org/):
 #### Via Git Tags
 ```bash
 # Download specific version
-git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.2.0 https://github.com/yourusername/printer-middleware.git
 
 # Or checkout specific version
 git checkout tags/v1.1.0
@@ -84,5 +96,5 @@ Download ZIP files from [GitHub Releases](https://github.com/yourusername/printe
 
 #### Via pip (if published)
 ```bash
-pip install printer-middleware==1.1.0
+pip install printer-middleware==1.2.0
 ```

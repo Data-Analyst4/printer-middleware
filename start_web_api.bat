@@ -4,6 +4,13 @@ setlocal
 set "ROOT_DIR=%~dp0"
 cd /d "%ROOT_DIR%"
 
+if /I "%~1"=="install-service" goto :install_service
+if /I "%~1"=="uninstall-service" goto :uninstall_service
+if /I "%~1"=="service-status" goto :service_status
+
+if /I "%~1"=="help" goto :usage
+if /I "%~1"=="/?" goto :usage
+
 set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
 if not exist "%PYTHON_EXE%" (
   echo [ERROR] Virtualenv Python not found at "%PYTHON_EXE%"
@@ -36,3 +43,33 @@ if /I "%~1"=="public" (
 
 "%PYTHON_EXE%" main.py --host %HOST% --port %PORT%
 exit /b %ERRORLEVEL%
+
+:install_service
+shift
+call "%ROOT_DIR%install_middleware_service.bat" %1 %2 %3 %4 %5 %6 %7 %8 %9
+exit /b %ERRORLEVEL%
+
+:uninstall_service
+shift
+call "%ROOT_DIR%uninstall_middleware_service.bat" %1 %2 %3 %4 %5 %6 %7 %8 %9
+exit /b %ERRORLEVEL%
+
+:service_status
+sc query "PrinterMiddleware"
+exit /b %ERRORLEVEL%
+
+:usage
+echo Usage:
+echo   start_web_api.bat
+echo   start_web_api.bat public
+echo   start_web_api.bat install-service [port]
+echo   start_web_api.bat uninstall-service
+echo   start_web_api.bat service-status
+echo.
+echo Commands:
+echo   install-service   Install as a Windows service that starts on boot
+echo                     and restarts automatically if the app closes.
+echo   uninstall-service Remove the Windows service.
+echo   service-status    Show current Windows service status.
+echo   public            Start the API now and launch the Cloudflare tunnel.
+exit /b 0

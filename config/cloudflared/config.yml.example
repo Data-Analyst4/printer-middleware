@@ -6,5 +6,5 @@ tunnel: 12345678-90ab-cdef-1234-567890abcdef
 credentials-file: C:\Users\DELL\.cloudflared\12345678-90ab-cdef-1234-567890abcdef.json
 ingress:
   - hostname: print.example.com      # use your real hostname
-    service: http://127.0.0.1:5000   # your Flask app
+    service: http://127.0.0.1:5001   # your Flask app; use the same port as PrinterMiddleware
   - service: http_status:404

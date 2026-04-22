@@ -1,6 +1,6 @@
 import re
 
-from app.services.printer_protocol import extract_single_command
+from app.services.printer_protocol import extract_commands
 
 
 def validate_request(data):
@@ -23,7 +23,7 @@ def validate_request(data):
         return False, "Invalid Port"
 
     try:
-        extract_single_command(data)
+        extract_commands(data)
     except ValueError as exc:
         return False, str(exc)
 
@@ -31,5 +31,13 @@ def validate_request(data):
     priority = data.get("priority")
     if priority and priority.lower() not in ["high", "normal"]:
         return False, "Priority must be 'high' or 'normal'"
+
+    await_response = data.get("await_response")
+    if await_response is not None and not isinstance(await_response, bool):
+        return False, "'await_response' must be true or false"
+
+    continue_on_error = data.get("continue_on_error")
+    if continue_on_error is not None and not isinstance(continue_on_error, bool):
+        return False, "'continue_on_error' must be true or false"
 
     return True, None

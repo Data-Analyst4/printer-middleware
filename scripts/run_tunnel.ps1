@@ -137,8 +137,8 @@ if ($ingress.Hostname -eq $SampleHostname) {
     Fail "Ingress hostname is still placeholder '$SampleHostname'. Set it to your real DNS hostname."
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ingress.OriginService) -and $ingress.OriginService -notmatch "^https?://127\.0\.0\.1:5000/?$") {
-    Write-Warning "Origin service is '$($ingress.OriginService)'. Default local setup expects 'http://127.0.0.1:5000'."
+if (-not [string]::IsNullOrWhiteSpace($ingress.OriginService) -and $ingress.OriginService -notmatch "^https?://127\.0\.0\.1:\d+/?$") {
+    Write-Warning "Origin service is '$($ingress.OriginService)'. Expected a local HTTP endpoint such as 'http://127.0.0.1:5001'."
 }
 
 $effectiveTunnel = if ([string]::IsNullOrWhiteSpace($TunnelName)) { $tunnelFromConfig } else { $TunnelName }

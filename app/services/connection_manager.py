@@ -200,7 +200,11 @@ class ConnectionManager:
             log(f"Opened persistent connection for {self.printer_id} -> {self.ip}:{self.port}")
         return self._sock
 
-    def send_command(self, command_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def send_command(
+        self,
+        command_dict: Dict[str, Any],
+        wait_for_response: Optional[bool] = None,
+    ) -> Dict[str, Any]:
         """Send one command and return detailed response diagnostics.
 
         Raises socket errors on network/transport failures; caller decides retry
@@ -235,9 +239,11 @@ class ConnectionManager:
                 sock.sendall(payload)
                 result["request_bytes"] = len(payload)
 
-                if FIRE_AND_FORGET:
+                should_wait_for_response = (not FIRE_AND_FORGET) if wait_for_response is None else wait_for_response
+
+                if not should_wait_for_response:
                     result["ok"] = True
-                    result["reason"] = "Sent in fire-and-forget mode"
+                    result["reason"] = "Sent without waiting for printer response"
                     return result
 
                 sock.settimeout(READ_TIMEOUT)
