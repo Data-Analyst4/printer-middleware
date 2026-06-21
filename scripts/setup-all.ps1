@@ -54,22 +54,73 @@ function Read-SiteEnv([string]$Path) {
     return $settings
 }
 
-function Ensure-Command([string]$Name, [scriptblock]$InstallAction) {
+function Refresh-SessionPath {
+    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
+    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
+    $env:Path = "$machinePath;$userPath"
+}
+
+function Find-InstalledExecutable {
+    param(
+        [string]$Name,
+        [string[]]$CandidatePaths
+    )
+
     if (Get-Command $Name -ErrorAction SilentlyContinue) {
-        Write-Host "  OK: $Name found"
+        return (Get-Command $Name -ErrorAction Stop).Source
+    }
+
+    foreach ($candidate in $CandidatePaths) {
+        if (Test-Path $candidate) {
+            $parent = Split-Path -Parent $candidate
+            if ($env:Path -notlike "*$parent*") {
+                $env:Path = "$parent;$env:Path"
+            }
+            return $candidate
+        }
+    }
+
+    return $null
+}
+
+function Ensure-Command {
+    param(
+        [string]$Name,
+        [string[]]$CandidatePaths = @(),
+        [scriptblock]$InstallAction
+    )
+
+    Refresh-SessionPath
+
+    $existing = Find-InstalledExecutable -Name $Name -CandidatePaths $CandidatePaths
+    if ($existing) {
+        Write-Host "  OK: $Name found at $existing"
         return
     }
+
     Write-Host "  Installing $Name..."
     & $InstallAction
-    if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-        throw "$Name is still missing after install attempt."
+
+    Start-Sleep -Seconds 2
+    Refresh-SessionPath
+
+    $installed = Find-InstalledExecutable -Name $Name -CandidatePaths $CandidatePaths
+    if (-not $installed) {
+        throw "$Name is still missing after install attempt. Open a new Administrator Command Prompt and rerun install.bat, or restart the PC and rerun install.bat."
     }
+
+    Write-Host "  OK: $Name found at $installed"
 }
 
 function Ensure-Python {
-    Ensure-Command "python" {
+    Ensure-Command "python" @(
+        "$env:LocalAppData\Programs\Python\Python311\python.exe",
+        "$env:LocalAppData\Programs\Python\Python312\python.exe",
+        "C:\Program Files\Python311\python.exe",
+        "C:\Program Files\Python312\python.exe"
+    ) {
         if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget install --id Python.Python.3.11 -e --accept-source-agreements --accept-package-agreements
+            winget install --id Python.Python.3.11 -e --accept-source-agreements --accept-package-agreements --disable-interactivity
         } else {
             throw "Python not found. Install from https://www.python.org/downloads/ (check Add to PATH), then rerun install.bat"
         }
@@ -77,9 +128,13 @@ function Ensure-Python {
 }
 
 function Ensure-Cloudflared {
-    Ensure-Command "cloudflared" {
+    Ensure-Command "cloudflared" @(
+        "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe",
+        "$env:ProgramFiles\cloudflared\cloudflared.exe",
+        "$env:ProgramData\chocolatey\bin\cloudflared.exe"
+    ) {
         if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements
+            winget install --id Cloudflare.cloudflared -e --accept-source-agreements --accept-package-agreements --disable-interactivity
         } elseif (Get-Command choco -ErrorAction SilentlyContinue) {
             choco install cloudflared -y
         } else {
