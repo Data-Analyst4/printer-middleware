@@ -10,6 +10,10 @@ class DatabaseManager:
         self.init_db()
 
     def init_db(self):
+        db_dir = os.path.dirname(self.db_path)
+        if db_dir:
+            os.makedirs(db_dir, exist_ok=True)
+
         with self.get_connection() as conn:
             conn.execute('''
                 CREATE TABLE IF NOT EXISTS jobs (

@@ -63,9 +63,13 @@ def main():
 
     if args.debug:
         app.run(host=args.host, port=args.port, debug=True, threaded=True, ssl_context=ssl_context)
-    else:
-        # Production mode - could use Waitress here
+    elif ssl_context:
         app.run(host=args.host, port=args.port, threaded=True, ssl_context=ssl_context)
+    else:
+        from waitress import serve
+
+        log("Using Waitress WSGI server (Windows service mode)")
+        serve(app, host=args.host, port=args.port, threads=8)
 
 if __name__ == "__main__":
     main()

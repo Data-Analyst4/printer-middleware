@@ -172,7 +172,7 @@ If install finishes with warnings, see Section 6.
 | Error / symptom | Cause | Fix |
 |-----------------|-------|-----|
 | `install_middleware_service.bat failed` | Python/venv missing | Fix Section B, rerun |
-| Health check failed on `127.0.0.1:5001/health` | Service did not start | Check `logs\service-error.log` |
+| Health check failed on `127.0.0.1:5001/health` | Service did not start or needs more time | Run `repair-middleware.bat` as Admin, read `logs\service-error.log`, then `install_middleware_service.bat 5001`. If local health is OK, run `continue-install.bat` to finish Cloudflare only. |
 | Service RUNNING but print fails | Wrong printer IP | Edit `config\printers.json`, restart service: `sc.exe stop PrinterMiddleware` then `sc.exe start PrinterMiddleware` |
 | Old API on wrong port | Stale process | `netstat -ano \| findstr :5001` — stop other process or change port |
 

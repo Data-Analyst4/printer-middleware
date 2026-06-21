@@ -10,25 +10,13 @@ param(
 Set-StrictMode -Version Latest
 $ErrorActionPreference = "Continue"
 
-function Invoke-Cloudflared {
-    $previousErrorAction = $ErrorActionPreference
-    $ErrorActionPreference = "SilentlyContinue"
-    try {
-        $output = & cloudflared @args 2>&1 | ForEach-Object {
-            if ($_ -is [System.Management.Automation.ErrorRecord]) {
-                $_.ToString()
-            } else {
-                $_
-            }
-        }
-        return @{
-            ExitCode = $LASTEXITCODE
-            Output = ($output | Out-String).Trim()
-        }
-    } finally {
-        $ErrorActionPreference = $previousErrorAction
-    }
+$RootDir = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
+$HelpersPath = Join-Path $RootDir "scripts\install-helpers.ps1"
+if (-not (Test-Path $HelpersPath)) {
+    Write-Error "Missing $HelpersPath"
+    exit 1
 }
+. $HelpersPath
 
 function Fail {
     param([string]$Message)
@@ -36,10 +24,22 @@ function Fail {
     exit 1
 }
 
+$script:CloudflaredExe = Resolve-CloudflaredPath -AllowMissing
+if (-not $script:CloudflaredExe) {
+    Fail "cloudflared is not installed. Install with: winget install Cloudflare.cloudflared"
+}
+Write-Host "Using cloudflared: $script:CloudflaredExe"
+
+function Invoke-Cloudflared {
+    param([Parameter(ValueFromRemainingArguments = $true)][string[]]$ArgumentList)
+
+    return Invoke-External -FilePath $script:CloudflaredExe -ArgumentList $ArgumentList
+}
+
 function Get-TunnelIdByName {
     param([string]$Name)
 
-    $result = Invoke-Cloudflared tunnel list
+    $result = Invoke-Cloudflared @("tunnel", "list")
     foreach ($line in ($result.Output -split "`r?`n")) {
         if ($line -match "^([0-9a-f-]{36})\s+(\S+)") {
             if ($Matches[2] -eq $Name) {
@@ -132,10 +132,6 @@ function Write-TunnelConfig {
     Set-Content -Path $Path -Value ($lines -join "`n") -Encoding UTF8
 }
 
-if (-not (Get-Command cloudflared -ErrorAction SilentlyContinue)) {
-    Fail "cloudflared is not installed. Install with: choco install cloudflared"
-}
-
 $cloudflaredDir = Join-Path $env:USERPROFILE ".cloudflared"
 if (-not (Test-Path $cloudflaredDir)) {
     New-Item -ItemType Directory -Path $cloudflaredDir -Force | Out-Null
@@ -146,9 +142,9 @@ if (-not (Test-Path $certPath)) {
     Write-Host ""
     Write-Host "Cloudflare login required. Complete the browser prompt, then return here."
     Write-Host ""
-    & cloudflared tunnel login
-    if ($LASTEXITCODE -ne 0) {
-        Fail "cloudflared tunnel login failed."
+    $loginResult = Invoke-Cloudflared tunnel login
+    if ($loginResult.ExitCode -ne 0) {
+        Fail "cloudflared tunnel login failed: $($loginResult.Output)"
     }
     if (-not (Test-Path $certPath)) {
         Fail "Login did not create cert.pem at $certPath"
@@ -158,7 +154,7 @@ if (-not (Test-Path $certPath)) {
 $tunnelId = Get-TunnelIdByName -Name $TunnelName
 if (-not $tunnelId) {
     Write-Host "Creating Cloudflare tunnel '$TunnelName'..."
-    $createResult = Invoke-Cloudflared tunnel create $TunnelName
+    $createResult = Invoke-Cloudflared @("tunnel", "create", $TunnelName)
     if ($createResult.Output) {
         Write-Host $createResult.Output
     }
@@ -176,11 +172,27 @@ if (-not $tunnelId) {
 
 $credentialsFile = Join-Path $cloudflaredDir "$tunnelId.json"
 if (-not (Test-Path $credentialsFile)) {
-    Fail "Tunnel credentials file not found at $credentialsFile"
+    Fail @"
+Tunnel credentials file not found at $credentialsFile
+
+The tunnel '$TunnelName' exists in your Cloudflare account, but this PC does not have its secret key file.
+Fix one of these:
+
+  A) Copy the file from the PC that originally created the tunnel:
+       $credentialsFile
+
+  B) In Cloudflare Zero Trust -> Networks -> Tunnels -> $TunnelName -> Configure,
+     regenerate/download credentials and save them as:
+       $credentialsFile
+
+  C) Delete tunnel '$TunnelName' in Cloudflare, then rerun this script to create a new tunnel on this PC.
+
+Then rerun: scripts\setup_r10_tunnel.ps1 -Port $Port
+"@
 }
 
 Write-Host "Routing DNS: $Hostname -> tunnel '$TunnelName'..."
-$dnsResult = Invoke-Cloudflared tunnel route dns $TunnelName $Hostname
+$dnsResult = Invoke-Cloudflared @("tunnel", "route", "dns", $TunnelName, $Hostname)
 if ($dnsResult.Output) {
     Write-Host $dnsResult.Output
 }
@@ -214,7 +226,7 @@ if ($hrRule) {
     $activeIngress += $hrRule
 
     Write-Host "Routing DNS: $($hrRule.Hostname) -> tunnel '$TunnelName'..."
-    $hrDnsResult = Invoke-Cloudflared tunnel route dns $TunnelName $hrRule.Hostname
+    $hrDnsResult = Invoke-Cloudflared @("tunnel", "route", "dns", $TunnelName, $hrRule.Hostname)
     if ($hrDnsResult.Output) {
         Write-Host $hrDnsResult.Output
     }

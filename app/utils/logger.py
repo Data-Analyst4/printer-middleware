@@ -19,7 +19,7 @@ def log(message, level="INFO", job_id=None, printer_id=None, extra_data=None):
         log_line += f" [Job: {job_id}]"
     if printer_id:
         log_line += f" [Printer: {printer_id}]"
-    print(log_line)
+    print(log_line, flush=True)
 
     # File log
     with open(LOG_FILE, "a") as f:

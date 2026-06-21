@@ -2,7 +2,8 @@
 # Run via install.bat (self-elevates to Administrator).
 
 param(
-    [switch]$SkipCloudflareLogin
+    [switch]$SkipCloudflareLogin,
+    [switch]$TunnelAndCloudflaredOnly
 )
 
 Set-StrictMode -Version Latest
@@ -41,6 +42,7 @@ function Ensure-Admin {
         "-File", "`"$PSCommandPath`""
     )
     if ($SkipCloudflareLogin) { $argList += "-SkipCloudflareLogin" }
+    if ($TunnelAndCloudflaredOnly) { $argList += "-TunnelAndCloudflaredOnly" }
     Start-Process powershell.exe -Verb RunAs -ArgumentList ($argList -join " ") -WorkingDirectory $RootDir
     exit 0
 }
@@ -267,9 +269,34 @@ function Ensure-CloudflareTunnel {
     Write-Host "  Wrote $CloudflaredConfig"
 }
 
-function Test-LocalHealth([string]$Port) {
+function Show-ServiceLogs {
+    param([string]$RootDir)
+
+    $outputLog = Join-Path $RootDir "logs\service-output.log"
+    $errorLog = Join-Path $RootDir "logs\service-error.log"
+
+    foreach ($logPath in @($outputLog, $errorLog)) {
+        if (Test-Path $logPath) {
+            Write-Host ""
+            Write-Host "--- Last 20 lines of $logPath ---" -ForegroundColor Yellow
+            Get-Content $logPath -Tail 20 | ForEach-Object { Write-Host $_ }
+        }
+    }
+}
+
+function Test-LocalHealth {
+    param(
+        [string]$Port,
+        [string]$RootDir
+    )
+
     $uri = "http://127.0.0.1:$Port/health"
-    $deadline = (Get-Date).AddSeconds(60)
+
+    Write-Host "  Ensuring PrinterMiddleware service is started..."
+    sc.exe start PrinterMiddleware | Out-Null
+    Start-Sleep -Seconds 5
+
+    $deadline = (Get-Date).AddSeconds(120)
     while ((Get-Date) -lt $deadline) {
         try {
             $response = Invoke-RestMethod -Uri $uri -TimeoutSec 5
@@ -278,10 +305,101 @@ function Test-LocalHealth([string]$Port) {
                 return
             }
         } catch {
-            Start-Sleep -Seconds 3
+            $service = Get-Service -Name PrinterMiddleware -ErrorAction SilentlyContinue
+            if ($service -and $service.Status -ne "Running") {
+                sc.exe start PrinterMiddleware | Out-Null
+            }
+            Start-Sleep -Seconds 5
         }
     }
-    throw "Middleware health check failed at $uri. Check logs\service-output.log and logs\service-error.log"
+
+    Write-Host ""
+    sc.exe query PrinterMiddleware
+    Show-ServiceLogs -RootDir $RootDir
+    throw "Middleware health check failed at $uri. Review the log lines above, then run: sc.exe start PrinterMiddleware"
+}
+
+function Initialize-InstallSettings {
+    Write-Step "Loading site configuration"
+    if (-not (Test-Path $SiteEnvPath)) {
+        if (Test-Path $SiteEnvExample) {
+            Copy-Item $SiteEnvExample $SiteEnvPath
+            Write-Host "  Created config/site.env from example. Edit printer IPs before printing."
+        } else {
+            throw "Missing config/site.env and config/site.env.example"
+        }
+    }
+
+    $settings = Read-SiteEnv $SiteEnvPath
+    $defaults = @{
+        TUNNEL_NAME = "r10-print"
+        PUBLIC_HOSTNAME = "r10-print.k95foods.com"
+        PORT = "5001"
+        HOST = "0.0.0.0"
+        CORS_ORIGINS = "*"
+    }
+    foreach ($key in $defaults.Keys) {
+        if (-not $settings.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($settings[$key])) {
+            $settings[$key] = $defaults[$key]
+        }
+    }
+
+    Write-Host "  Tunnel:   $($settings['TUNNEL_NAME'])"
+    Write-Host "  Public:   https://$($settings['PUBLIC_HOSTNAME'])"
+    Write-Host "  Port:     $($settings['PORT'])"
+    return $settings
+}
+
+function Finish-TunnelAndCloudflaredInstall {
+    param([hashtable]$Settings)
+
+    Write-Step "Configuring Cloudflare tunnel for $($Settings['PUBLIC_HOSTNAME'])"
+    Ensure-CloudflareTunnel -Settings $Settings
+
+    Stop-ManualCloudflaredProcesses
+
+    Write-Step "Installing cloudflared Windows service (auto-start on boot)"
+    $cloudflaredInstaller = Join-Path $RootDir "install_cloudflared_service.bat"
+    if (-not (Test-Path $cloudflaredInstaller)) { throw "Missing $cloudflaredInstaller" }
+    & cmd.exe /c "`"$cloudflaredInstaller`""
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "install_cloudflared_service.bat returned exit code $LASTEXITCODE. Attempting repair..."
+    }
+
+    Ensure-CloudflaredServiceHealthy -RootDir $RootDir
+
+    Start-Sleep -Seconds 3
+    Write-Step "Final status"
+    Write-Host ""
+    sc.exe query PrinterMiddleware
+    Write-Host ""
+    sc.exe query Cloudflared
+
+    $verifyScript = Join-Path $RootDir "scripts\verify_production.ps1"
+    if (Test-Path $verifyScript) {
+        Write-Step "Running verification"
+        & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifyScript -Port $Settings["PORT"] -Hostname $Settings["PUBLIC_HOSTNAME"]
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Verification reported issues. See INSTALL_GUIDE.md troubleshooting section."
+        }
+    }
+
+    Write-Host ""
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host "  Install complete" -ForegroundColor Green
+    Write-Host "============================================================" -ForegroundColor Green
+    Write-Host ""
+    Write-Host "  Local:   http://127.0.0.1:$($Settings['PORT'])/health"
+    Write-Host "  Public:  https://$($Settings['PUBLIC_HOSTNAME'])/health"
+    Write-Host ""
+    Write-Host "  On every Windows boot:"
+    Write-Host "    - PrinterMiddleware starts automatically"
+    Write-Host "    - cloudflared starts automatically"
+    Write-Host "    - Both restart automatically after crash"
+    Write-Host ""
+    Write-Host "  Edit printers:  config\printers.json"
+    Write-Host "  Edit domain:    config\site.env  (then rerun install.bat)"
+    Write-Host ""
 }
 
 Ensure-Admin
@@ -289,39 +407,26 @@ Set-Location $RootDir
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green
-Write-Host "  Printer Middleware - One-Click Install" -ForegroundColor Green
+if ($TunnelAndCloudflaredOnly) {
+    Write-Host "  Printer Middleware - Finish Tunnel Install" -ForegroundColor Green
+} else {
+    Write-Host "  Printer Middleware - One-Click Install" -ForegroundColor Green
+}
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "  Project: $RootDir"
 
-Test-Preflight
-
-Write-Step "Loading site configuration"
-if (-not (Test-Path $SiteEnvPath)) {
-    if (Test-Path $SiteEnvExample) {
-        Copy-Item $SiteEnvExample $SiteEnvPath
-        Write-Host "  Created config/site.env from example. Edit printer IPs before printing."
-    } else {
-        throw "Missing config/site.env and config/site.env.example"
-    }
+if (-not $TunnelAndCloudflaredOnly) {
+    Test-Preflight
 }
 
-$settings = Read-SiteEnv $SiteEnvPath
-$defaults = @{
-    TUNNEL_NAME = "r10-print"
-    PUBLIC_HOSTNAME = "r10-print.k95foods.com"
-    PORT = "5001"
-    HOST = "0.0.0.0"
-    CORS_ORIGINS = "*"
-}
-foreach ($key in $defaults.Keys) {
-    if (-not $settings.ContainsKey($key) -or [string]::IsNullOrWhiteSpace($settings[$key])) {
-        $settings[$key] = $defaults[$key]
-    }
-}
+$settings = Initialize-InstallSettings
 
-Write-Host "  Tunnel:   $($settings['TUNNEL_NAME'])"
-Write-Host "  Public:   https://$($settings['PUBLIC_HOSTNAME'])"
-Write-Host "  Port:     $($settings['PORT'])"
+if ($TunnelAndCloudflaredOnly) {
+    Write-Step "Verifying middleware locally"
+    Test-LocalHealth -Port $settings["PORT"] -RootDir $RootDir
+    Finish-TunnelAndCloudflaredInstall -Settings $settings
+    exit 0
+}
 
 Write-Step "Printer configuration"
 if (-not (Test-Path $PrintersPath)) {
@@ -352,52 +457,9 @@ if (-not (Test-Path $middlewareInstaller)) { throw "Missing $middlewareInstaller
 if ($LASTEXITCODE -ne 0) { throw "install_middleware_service.bat failed with exit code $LASTEXITCODE" }
 
 Write-Step "Verifying middleware locally"
-Test-LocalHealth -Port $settings["PORT"]
+Test-LocalHealth -Port $settings["PORT"] -RootDir $RootDir
 
-Write-Step "Configuring Cloudflare tunnel for $($settings['PUBLIC_HOSTNAME'])"
-Ensure-CloudflareTunnel -Settings $settings
+Finish-TunnelAndCloudflaredInstall -Settings $settings
+exit 0
 
-Stop-ManualCloudflaredProcesses
-
-Write-Step "Installing cloudflared Windows service (auto-start on boot)"
-$cloudflaredInstaller = Join-Path $RootDir "install_cloudflared_service.bat"
-if (-not (Test-Path $cloudflaredInstaller)) { throw "Missing $cloudflaredInstaller" }
-& cmd.exe /c "`"$cloudflaredInstaller`""
-if ($LASTEXITCODE -ne 0) {
-    Write-Warning "install_cloudflared_service.bat returned exit code $LASTEXITCODE. Attempting repair..."
-}
-
-Ensure-CloudflaredServiceHealthy -RootDir $RootDir
-
-Start-Sleep -Seconds 3
-Write-Step "Final status"
-Write-Host ""
-sc.exe query PrinterMiddleware
-Write-Host ""
-sc.exe query Cloudflared
-
-$verifyScript = Join-Path $RootDir "scripts\verify_production.ps1"
-if (Test-Path $verifyScript) {
-    Write-Step "Running verification"
-    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifyScript -Port $settings["PORT"] -Hostname $settings["PUBLIC_HOSTNAME"]
-    if ($LASTEXITCODE -ne 0) {
-        Write-Warning "Verification reported issues. See INSTALL_GUIDE.md troubleshooting section."
-    }
-}
-
-Write-Host ""
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host "  Install complete" -ForegroundColor Green
-Write-Host "============================================================" -ForegroundColor Green
-Write-Host ""
-Write-Host "  Local:   http://127.0.0.1:$($settings['PORT'])/health"
-Write-Host "  Public:  https://$($settings['PUBLIC_HOSTNAME'])/health"
-Write-Host ""
-Write-Host "  On every Windows boot:"
-Write-Host "    - PrinterMiddleware starts automatically"
-Write-Host "    - cloudflared starts automatically"
-Write-Host "    - Both restart automatically after crash"
-Write-Host ""
-Write-Host "  Edit printers:  config\printers.json"
-Write-Host "  Edit domain:    config\site.env  (then rerun install.bat)"
-Write-Host ""
+# Unreachable: Finish-TunnelAndCloudflaredInstall prints completion banner and exits above.

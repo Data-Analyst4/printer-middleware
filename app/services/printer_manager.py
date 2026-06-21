@@ -213,4 +213,7 @@ def get_metrics() -> Dict[str, Any]:
 
 # Load printer targets from config on startup.
 for printer_id, cfg in load_printers().items():
-    register_printer(printer_id, cfg["ip"], cfg["port"])
+    try:
+        register_printer(printer_id, cfg["ip"], cfg["port"])
+    except (KeyError, TypeError, ValueError) as exc:
+        log(f"Skipping invalid printer config for {printer_id}: {exc}", level="ERROR")

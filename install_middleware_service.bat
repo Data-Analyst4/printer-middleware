@@ -56,6 +56,12 @@ if not exist "%APP_SCRIPT%" (
 )
 
 if not exist "%ROOT_DIR%logs" mkdir "%ROOT_DIR%logs"
+if not exist "%ROOT_DIR%app\db" mkdir "%ROOT_DIR%app\db"
+
+rem Local System (Windows service account) must write logs and SQLite DB.
+icacls "%ROOT_DIR%logs" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+icacls "%ROOT_DIR%app\db" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+icacls "%ROOT_DIR%config" /grant "SYSTEM:(OI)(CI)M" /T >nul 2>&1
 
 if exist "%LOCAL_NSSM%" goto have_nssm
 
@@ -100,13 +106,14 @@ echo [2/6] Removing any previous "%SERVICE_NAME%" service...
 sc delete "%SERVICE_NAME%" >nul 2>&1
 
 echo [3/6] Installing "%SERVICE_NAME%"...
-"%NSSM_EXE%" install "%SERVICE_NAME%" "%PYTHON_EXE%" "%APP_SCRIPT%" --host %HOST% --port %PORT%
+"%NSSM_EXE%" install "%SERVICE_NAME%" "%PYTHON_EXE%"
 if errorlevel 1 (
   echo [ERROR] Failed to install the Windows service.
   exit /b 1
 )
 
 echo [4/6] Configuring service settings...
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppParameters "main.py --host %HOST% --port %PORT%"
 "%NSSM_EXE%" set "%SERVICE_NAME%" DisplayName "%DISPLAY_NAME%"
 "%NSSM_EXE%" set "%SERVICE_NAME%" Description "Printer middleware API for remote web apps and printer communication"
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppDirectory "%ROOT_DIR%"
@@ -116,10 +123,11 @@ echo [4/6] Configuring service settings...
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppRotateFiles 1
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppRotateOnline 1
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppRotateBytes 10485760
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppNoConsole 1
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppExit Default Restart
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppRestartDelay 5000
 "%NSSM_EXE%" set "%SERVICE_NAME%" AppThrottle 1500
-"%NSSM_EXE%" set "%SERVICE_NAME%" AppEnvironmentExtra "HOST=%HOST%" "PORT=%PORT%" "CORS_ORIGINS=%CORS_ORIGINS%" "PRINTER_READ_TIMEOUT=%PRINTER_READ_TIMEOUT%" "PRINTER_FIRE_AND_FORGET=%PRINTER_FIRE_AND_FORGET%"
+"%NSSM_EXE%" set "%SERVICE_NAME%" AppEnvironmentExtra "PYTHONUNBUFFERED=1" "HOST=%HOST%" "PORT=%PORT%" "CORS_ORIGINS=%CORS_ORIGINS%" "PRINTER_READ_TIMEOUT=%PRINTER_READ_TIMEOUT%" "PRINTER_FIRE_AND_FORGET=%PRINTER_FIRE_AND_FORGET%"
 
 echo [5/6] Enabling Windows Service recovery...
 sc failure "%SERVICE_NAME%" reset= 86400 actions= restart/5000/restart/5000/restart/5000 >nul
@@ -131,7 +139,21 @@ if errorlevel 1 (
   echo [WARNING] Service start returned a non-zero code.
   echo           Check logs if the service does not reach RUNNING.
 )
-timeout /t 2 >nul
+
+echo Waiting for middleware to listen on port %PORT%...
+set "PORT_READY="
+for /L %%n in (1,1,24) do (
+  for /f %%i in ('powershell -NoProfile -ExecutionPolicy Bypass -Command "$c=Get-NetTCPConnection -State Listen -LocalPort %PORT% -ErrorAction SilentlyContinue | Select-Object -First 1 -ExpandProperty OwningProcess; if($c){Write-Output $c}"') do set "PORT_READY=%%i"
+  if defined PORT_READY goto port_ready
+  timeout /t 5 >nul
+)
+echo [WARNING] Port %PORT% is not listening yet. Check logs\service-error.log
+goto service_done
+
+:port_ready
+echo [OK] Middleware is listening on port %PORT% (PID !PORT_READY!)
+
+:service_done
 
 echo.
 echo ============================================================
