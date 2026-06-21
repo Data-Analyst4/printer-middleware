@@ -116,18 +116,7 @@ function Ensure-Command {
 }
 
 function Ensure-Python {
-    Ensure-Command "python" @(
-        "$env:LocalAppData\Programs\Python\Python311\python.exe",
-        "$env:LocalAppData\Programs\Python\Python312\python.exe",
-        "C:\Program Files\Python311\python.exe",
-        "C:\Program Files\Python312\python.exe"
-    ) {
-        if (Get-Command winget -ErrorAction SilentlyContinue) {
-            winget install --id Python.Python.3.11 -e --accept-source-agreements --accept-package-agreements --disable-interactivity
-        } else {
-            throw "Python not found. Install from https://www.python.org/downloads/ (check Add to PATH), then rerun install.bat"
-        }
-    }
+    $script:PythonExe = Ensure-PythonRuntime
 }
 
 function Ensure-Cloudflared {
@@ -147,14 +136,40 @@ function Ensure-Cloudflared {
 }
 
 function Ensure-Venv {
-    $venvPython = Join-Path $RootDir ".venv\Scripts\python.exe"
+    if (-not $script:PythonExe) {
+        throw "Python executable was not resolved before virtual environment setup."
+    }
+
+    $venvDir = Join-Path $RootDir ".venv"
+    $venvPython = Join-Path $venvDir "Scripts\python.exe"
+
+    if ((Test-Path $venvDir) -and -not (Test-Path $venvPython)) {
+        Write-Host "  Removing incomplete virtual environment..."
+        Remove-Item $venvDir -Recurse -Force
+    }
+
     if (-not (Test-Path $venvPython)) {
         Write-Host "  Creating virtual environment..."
-        python -m venv (Join-Path $RootDir ".venv")
+        $venvResult = Invoke-Python -PythonRef $script:PythonExe -ArgumentList @("-m", "venv", $venvDir)
+        if ($venvResult.ExitCode -ne 0) {
+            throw "Failed to create virtual environment: $($venvResult.Output)"
+        }
     }
+
+    if (-not (Test-Path $venvPython)) {
+        throw "Virtual environment python was not created at $venvPython"
+    }
+
     Write-Host "  Installing Python packages..."
-    & $venvPython -m pip install --upgrade pip | Out-Null
-    & $venvPython -m pip install -r (Join-Path $RootDir "requirements.txt")
+    $pipUpgrade = Invoke-External -FilePath $venvPython -ArgumentList @("-m", "pip", "install", "--upgrade", "pip")
+    if ($pipUpgrade.ExitCode -ne 0) {
+        throw "Failed to upgrade pip: $($pipUpgrade.Output)"
+    }
+
+    $pipInstall = Invoke-External -FilePath $venvPython -ArgumentList @("-m", "pip", "install", "-r", (Join-Path $RootDir "requirements.txt"))
+    if ($pipInstall.ExitCode -ne 0) {
+        throw "Failed to install Python packages: $($pipInstall.Output)"
+    }
 }
 
 function Ensure-CloudflareTunnel {

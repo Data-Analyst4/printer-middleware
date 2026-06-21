@@ -1,3 +1,125 @@
+function Test-IsWindowsStorePythonStub {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    return ($Path -match "\\WindowsApps\\python\.exe$" -or $Path -match "\\WindowsApps\\PythonSoftwareFoundation")
+}
+
+function Test-RealPythonExecutable {
+    param([string]$Path)
+
+    if (-not $Path -or -not (Test-Path $Path)) {
+        return $false
+    }
+
+    if (Test-IsWindowsStorePythonStub -Path $Path) {
+        return $false
+    }
+
+    $result = Invoke-External -FilePath $Path -ArgumentList @("--version")
+    return ($result.ExitCode -eq 0 -and $result.Output -match "Python 3\.")
+}
+
+function Resolve-PythonPath {
+    $candidatePaths = @(
+        "$env:LocalAppData\Programs\Python\Python313\python.exe",
+        "$env:LocalAppData\Programs\Python\Python312\python.exe",
+        "$env:LocalAppData\Programs\Python\Python311\python.exe",
+        "$env:LocalAppData\Programs\Python\Python310\python.exe",
+        "C:\Program Files\Python313\python.exe",
+        "C:\Program Files\Python312\python.exe",
+        "C:\Program Files\Python311\python.exe",
+        "C:\Program Files\Python310\python.exe"
+    )
+
+    foreach ($candidate in $candidatePaths) {
+        if (Test-RealPythonExecutable -Path $candidate) {
+            return $candidate
+        }
+    }
+
+    Refresh-SessionPath
+
+    foreach ($commandName in @("python", "python3")) {
+        $command = Get-Command $commandName -ErrorAction SilentlyContinue
+        if ($command -and (Test-RealPythonExecutable -Path $command.Source)) {
+            return $command.Source
+        }
+    }
+
+    $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
+    if ($pyLauncher) {
+        foreach ($versionArg in @("-3.13", "-3.12", "-3.11", "-3.10")) {
+            $result = Invoke-External -FilePath $pyLauncher.Source -ArgumentList @($versionArg, "--version")
+            if ($result.ExitCode -eq 0) {
+                return "$($pyLauncher.Source)|$versionArg"
+            }
+        }
+    }
+
+    return $null
+}
+
+function Invoke-Python {
+    param(
+        [string]$PythonRef,
+        [string[]]$ArgumentList
+    )
+
+    if ($PythonRef -match "\|") {
+        $parts = $PythonRef -split "\|", 2
+        return Invoke-External -FilePath $parts[0] -ArgumentList @($parts[1]) + $ArgumentList
+    }
+
+    return Invoke-External -FilePath $PythonRef -ArgumentList $ArgumentList
+}
+
+function Ensure-PythonRuntime {
+    $python = Resolve-PythonPath
+    if ($python) {
+        Write-Host "  OK: python found at $python"
+        return $python
+    }
+
+    $stub = Get-Command python -ErrorAction SilentlyContinue
+    if ($stub -and (Test-IsWindowsStorePythonStub -Path $stub.Source)) {
+        Write-Host "  Detected Windows Store python alias (not a real install)."
+        Write-Host "  Installing Python 3.11..."
+    } else {
+        Write-Host "  Python not found. Installing Python 3.11..."
+    }
+
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        throw "Real Python was not found. Install Python 3.11 from https://www.python.org/downloads/ and check 'Add python.exe to PATH', then rerun install.bat"
+    }
+
+    $installResult = Invoke-External -FilePath "winget" -ArgumentList @(
+        "install",
+        "--id", "Python.Python.3.11",
+        "-e",
+        "--accept-source-agreements",
+        "--accept-package-agreements",
+        "--disable-interactivity"
+    )
+    if ($installResult.Output) {
+        Write-Host $installResult.Output
+    }
+
+    Start-Sleep -Seconds 3
+    Refresh-SessionPath
+
+    $python = Resolve-PythonPath
+    if (-not $python) {
+        throw "Python is still unavailable after install attempt. Install Python 3.11 manually, disable Settings > Apps > Advanced app settings > App execution aliases for python.exe, then rerun install.bat"
+    }
+
+    Write-Host "  OK: python found at $python"
+    return $python
+}
+
 function Refresh-SessionPath {
     $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
