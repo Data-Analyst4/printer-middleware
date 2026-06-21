@@ -164,6 +164,7 @@ If install finishes with warnings, see Section 6.
 | `pip install` fails | No internet / proxy | Fix internet; rerun `install.bat` |
 | Port 5001 already in use | Another app on 5001 | Change `PORT=5002` in `config\site.env`, rerun `install.bat` |
 | `Python was not found` / WindowsApps python | Windows Store alias, not real Python | Install Python 3.11 via winget or python.org; disable App execution aliases for python.exe; delete `.venv`; rerun `install.bat` |
+| `Python was not found` / WindowsApps python | Windows Store alias, not real Python | Install Python 3.11; disable App execution aliases for `python.exe`; delete `.venv`; rerun `install.bat` |
 | `Virtualenv Python not found` | venv creation failed | Delete `.venv` folder, rerun `install.bat` |
 
 ### C. PrinterMiddleware service
