@@ -107,6 +107,8 @@ dmypy.json
 
 # Application specific
 app/db/jobs.db
+config/printers.json
+config/site.env
 logs/
 *.log
 

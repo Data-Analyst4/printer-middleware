@@ -1,0 +1,11 @@
+# Production template for r10-print.k95foods.com
+# install_production.bat writes the real file to:
+#   %USERPROFILE%\.cloudflared\config.yml
+#
+# Replace placeholders only if configuring manually:
+tunnel: YOUR_TUNNEL_UUID
+credentials-file: C:\Users\YOUR_USER\.cloudflared\YOUR_TUNNEL_UUID.json
+ingress:
+  - hostname: r10-print.k95foods.com
+    service: http://127.0.0.1:5001
+  - service: http_status:404

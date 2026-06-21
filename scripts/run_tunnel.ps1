@@ -1,6 +1,7 @@
 param(
     [string]$TunnelName = "",
-    [string]$ConfigPath = "$HOME\.cloudflared\config.yml"
+    [string]$ConfigPath = "$HOME\.cloudflared\config.yml",
+    [int]$ExpectedPort = 5001
 )
 
 Set-StrictMode -Version Latest
@@ -137,8 +138,9 @@ if ($ingress.Hostname -eq $SampleHostname) {
     Fail "Ingress hostname is still placeholder '$SampleHostname'. Set it to your real DNS hostname."
 }
 
-if (-not [string]::IsNullOrWhiteSpace($ingress.OriginService) -and $ingress.OriginService -notmatch "^https?://127\.0\.0\.1:5000/?$") {
-    Write-Warning "Origin service is '$($ingress.OriginService)'. Default local setup expects 'http://127.0.0.1:5000'."
+$expectedOrigin = "http://127.0.0.1:$ExpectedPort"
+if (-not [string]::IsNullOrWhiteSpace($ingress.OriginService) -and $ingress.OriginService -notmatch "^https?://127\.0\.0\.1:$ExpectedPort/?$") {
+    Write-Warning "Origin service is '$($ingress.OriginService)'. Production setup expects '$expectedOrigin'."
 }
 
 $effectiveTunnel = if ([string]::IsNullOrWhiteSpace($TunnelName)) { $tunnelFromConfig } else { $TunnelName }

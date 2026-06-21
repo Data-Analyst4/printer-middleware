@@ -92,6 +92,41 @@ Server starts at `http://0.0.0.0:5000`
 
 Open `http://localhost:5000` in your browser for the monitoring dashboard.
 
+### Windows Auto-Start and Auto-Restart
+
+For production on a print-site PC (middleware + Cloudflare tunnel, boot start,
+crash restart, public URL `https://r10-print.k95foods.com`), run once as
+Administrator:
+
+```powershell
+.\install_production.bat
+```
+
+This installs:
+
+- `PrinterMiddleware` Windows service on port `5001`
+- Cloudflare tunnel `r10-print` → `r10-print.k95foods.com`
+- `cloudflared` Windows service (tunnel starts on every reboot)
+
+Verify after install or reboot:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\verify_production.ps1
+```
+
+Remove production services:
+
+```powershell
+.\uninstall_production.bat
+```
+
+Manual middleware-only install (no tunnel):
+
+```powershell
+.\install_middleware_service.bat 5001
+.\uninstall_middleware_service.bat
+```
+
 ---
 
 ## 🌐 Expose over HTTPS
@@ -550,6 +585,36 @@ curl http://localhost:5000/job/$JOB_ID | jq
 ```bash
 curl http://localhost:5000/metrics | jq
 ```
+
+### Mock Printer Simulator
+
+You can run a local fake printer that listens on a real `ip:port` and responds
+like a printer so the middleware can be tested end to end without hardware.
+
+```bash
+python scripts/mock_printer.py --host 127.0.0.1 --port 9100
+```
+
+Then send the middleware request to that target:
+
+```bash
+curl -X POST http://localhost:5000/print \
+  -H "Content-Type: application/json" \
+  -d '{
+    "printer_id": "SIM1",
+    "printer": {"ip": "127.0.0.1", "port": 9100},
+    "command": {"command": "STAR", "templatename": "DEMO"}
+  }'
+```
+
+Useful simulator modes:
+
+- `--response-mode text` to mimic raw protocol responses like `STAR;YES`
+- `--response-mode json` to mimic JSON acknowledgements
+- `--failure-mode sysn` to test printer failure handling
+- `--failure-mode alarm` to test RSAL alarm handling
+- `--close-without-response` to test timeout and disconnect behavior
+- `--response-delay 6` to force a read timeout when middleware timeout is lower
 
 ---
 

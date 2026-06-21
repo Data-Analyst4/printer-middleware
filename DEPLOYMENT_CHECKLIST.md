@@ -1,5 +1,34 @@
 # Remote Deployment Checklist
 
+## Quick install (recommended)
+
+Run once as **Administrator** from the project folder:
+
+```powershell
+cd C:\Users\DELL\printer-middleware
+.\install_production.bat
+```
+
+This installs:
+
+- `PrinterMiddleware` on port **5001** (boot start + crash restart)
+- Cloudflare tunnel **`r10-print`** → **`r10-print.k95foods.com`**
+- `cloudflared` Windows service (tunnel on every reboot)
+
+Verify:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\verify_production.ps1
+```
+
+Remove:
+
+```powershell
+.\uninstall_production.bat
+```
+
+---
+
 This checklist turns the local printer middleware into a Windows machine service
 that:
 
