@@ -1,8 +1,17 @@
 # Remote Deployment Checklist
 
+> **Full hand-holding guide with every known install/tunnel error:** [INSTALL_GUIDE.md](INSTALL_GUIDE.md)
+
 ## Quick install (recommended)
 
 Run once as **Administrator** from the project folder:
+
+```cmd
+cd /d C:\printer-middleware
+install.bat
+```
+
+Alternative (same result):
 
 ```powershell
 cd C:\Users\DELL\printer-middleware
@@ -13,12 +22,21 @@ This installs:
 
 - `PrinterMiddleware` on port **5001** (boot start + crash restart)
 - Cloudflare tunnel **`r10-print`** → **`r10-print.k95foods.com`**
-- `cloudflared` Windows service (tunnel on every reboot)
+- `Cloudflared` Windows service (tunnel on every reboot)
+- Auto-repair and verification at the end of install
+
+No Git required. Download ZIP: https://github.com/Data-Analyst4/printer-middleware/archive/refs/heads/develop.zip
 
 Verify:
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\verify_production.ps1
+```
+
+If tunnel service fails:
+
+```cmd
+finish_cloudflared_service.bat
 ```
 
 Remove:

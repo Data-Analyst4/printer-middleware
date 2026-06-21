@@ -15,6 +15,11 @@ $PrintersPath = Join-Path $RootDir "config\printers.json"
 $PrintersExample = Join-Path $RootDir "config\printers.json.example"
 $CloudflaredDir = Join-Path $HOME ".cloudflared"
 $CloudflaredConfig = Join-Path $CloudflaredDir "config.yml"
+$HelpersPath = Join-Path $RootDir "scripts\install-helpers.ps1"
+if (-not (Test-Path $HelpersPath)) {
+    throw "Missing $HelpersPath"
+}
+. $HelpersPath
 
 function Write-Step([string]$Message) {
     Write-Host ""
@@ -54,55 +59,31 @@ function Read-SiteEnv([string]$Path) {
     return $settings
 }
 
-function Refresh-SessionPath {
-    $machinePath = [Environment]::GetEnvironmentVariable("Path", "Machine")
-    $userPath = [Environment]::GetEnvironmentVariable("Path", "User")
-    $env:Path = "$machinePath;$userPath"
-}
+function Test-Preflight {
+    Write-Step "Preflight checks"
 
-function Find-InstalledExecutable {
-    param(
-        [string]$Name,
-        [string[]]$CandidatePaths
-    )
-
-    Refresh-SessionPath
-
-    if (Get-Command $Name -ErrorAction SilentlyContinue) {
-        return (Get-Command $Name -ErrorAction Stop).Source
+    if (-not (Test-IsAdmin)) {
+        throw "Administrator privileges are required. Right-click install.bat and choose Run as administrator."
     }
 
-    foreach ($candidate in $CandidatePaths) {
-        if (Test-Path $candidate) {
-            $parent = Split-Path -Parent $candidate
-            if ($env:Path -notlike "*$parent*") {
-                $env:Path = "$parent;$env:Path"
-            }
-            return $candidate
-        }
+    if (-not (Test-Path (Join-Path $RootDir "main.py"))) {
+        throw "main.py was not found. Make sure you extracted the full ZIP into the install folder."
     }
 
-    if ($Name -eq "cloudflared") {
-        $globMatches = @(
-            Get-ChildItem -Path "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
-            Get-ChildItem -Path "$env:ProgramFiles\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
-            Get-ChildItem -Path "$env:ProgramFiles*\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
-        ) | Select-Object -First 1
-        if ($globMatches) {
-            $parent = Split-Path -Parent $globMatches.FullName
-            if ($env:Path -notlike "*$parent*") {
-                $env:Path = "$parent;$env:Path"
-            }
-            return $globMatches.FullName
-        }
+    if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
+        Write-Warning "winget was not found. Python and cloudflared must already be installed manually."
+        Write-Warning "Download Python: https://www.python.org/downloads/"
+        Write-Warning "Download cloudflared: https://developers.cloudflare.com/cloudflare-one/connections/connect-networks/downloads/"
+    } else {
+        Write-Host "  OK: winget found"
     }
 
-    $whereOutput = & where.exe $Name 2>$null | Select-Object -First 1
-    if ($whereOutput -and (Test-Path $whereOutput)) {
-        return $whereOutput
+    try {
+        Invoke-WebRequest -Uri "https://www.cloudflare.com" -UseBasicParsing -TimeoutSec 15 | Out-Null
+        Write-Host "  OK: internet access"
+    } catch {
+        Write-Warning "Internet check failed. winget, Cloudflare login, and tunnel setup require internet."
     }
-
-    return $null
 }
 
 function Ensure-Command {
@@ -176,17 +157,9 @@ function Ensure-Venv {
     & $venvPython -m pip install -r (Join-Path $RootDir "requirements.txt")
 }
 
-function Get-TunnelIdByName([string]$Name) {
-    $output = cloudflared tunnel list 2>&1 | Out-String
-    foreach ($line in ($output -split "`n")) {
-        if ($line -match "^\s*([0-9a-f-]{36})\s+$([regex]::Escape($Name))\s") {
-            return $Matches[1]
-        }
-    }
-    return $null
-}
+function Ensure-CloudflareTunnel {
+    param([hashtable]$Settings)
 
-function Ensure-CloudflareTunnel([hashtable]$Settings) {
     $tunnelName = $Settings["TUNNEL_NAME"]
     $hostname = $Settings["PUBLIC_HOSTNAME"]
     $port = $Settings["PORT"]
@@ -203,7 +176,10 @@ function Ensure-CloudflareTunnel([hashtable]$Settings) {
         Write-Host "  Cloudflare login required (one-time)." -ForegroundColor Yellow
         Write-Host "  A browser will open. Log in and select k95foods.com."
         Write-Host ""
-        cloudflared tunnel login
+        $loginResult = Invoke-Cloudflared @("tunnel", "login")
+        if ($loginResult.ExitCode -ne 0) {
+            throw "cloudflared tunnel login failed: $($loginResult.Output)"
+        }
     }
     if (-not (Test-Path $certPath)) {
         throw "Cloudflare cert.pem missing. Run: cloudflared tunnel login"
@@ -212,54 +188,85 @@ function Ensure-CloudflareTunnel([hashtable]$Settings) {
     $tunnelId = Get-TunnelIdByName -Name $tunnelName
     if (-not $tunnelId) {
         Write-Host "  Creating tunnel '$tunnelName'..."
-        $createOutput = cloudflared tunnel create $tunnelName 2>&1 | Out-String
+        $createResult = Invoke-Cloudflared @("tunnel", "create", $tunnelName)
+        if ($createResult.Output) {
+            Write-Host "  $($createResult.Output)"
+        }
+        if ($createResult.ExitCode -ne 0) {
+            throw "cloudflared tunnel create failed: $($createResult.Output)"
+        }
+
         $tunnelId = Get-TunnelIdByName -Name $tunnelName
-        if (-not $tunnelId -and $createOutput -match "([0-9a-f-]{36})") {
+        if (-not $tunnelId -and $createResult.Output -match "([0-9a-f-]{36})") {
             $tunnelId = $Matches[1]
         }
         if (-not $tunnelId) {
-            throw "Could not determine tunnel ID after create. Output: $createOutput"
+            throw "Could not determine tunnel ID after create."
         }
     } else {
         Write-Host "  OK: tunnel '$tunnelName' exists ($tunnelId)"
     }
 
     Write-Host "  Ensuring DNS route $hostname ..."
-    cloudflared tunnel route dns $tunnelName $hostname 2>&1 | Out-Null
+    $dnsResult = Invoke-Cloudflared @("tunnel", "route", "dns", $tunnelName, $hostname)
+    if ($dnsResult.Output) {
+        Write-Host "  $($dnsResult.Output)"
+    }
+    if ($dnsResult.ExitCode -ne 0 -and $dnsResult.Output -notmatch "already exists|Record already exists|CNAME") {
+        Write-Warning "DNS route may already exist or could not be updated automatically."
+    }
 
     $credentialsFile = Join-Path $CloudflaredDir "$tunnelId.json"
     if (-not (Test-Path $credentialsFile)) {
         throw "Tunnel credentials not found at $credentialsFile"
     }
 
-    $configText = @"
-tunnel: $tunnelId
-credentials-file: $credentialsFile
-ingress:
-  - hostname: $hostname
-    service: http://127.0.0.1:$port
-  - service: http_status:404
-"@
+    $ingressRules = @(
+        @{
+            Hostname = $hostname
+            Service = "http://127.0.0.1:$port"
+        }
+    )
 
-    Set-Content -Path $CloudflaredConfig -Value $configText -Encoding UTF8
+    $hrConfigPath = Join-Path $CloudflaredDir "config-v8-middleware.yml"
+    $hrRules = Read-IngressRules -Path $hrConfigPath | Where-Object { $_.Hostname -eq "v8-mw.k95foods.com" }
+    foreach ($hrRule in $hrRules) {
+        $existingHostnames = @($ingressRules | ForEach-Object { $_.Hostname })
+        if ($existingHostnames -notcontains $hrRule.Hostname) {
+            Write-Host "  Keeping HR middleware hostname in shared tunnel config: $($hrRule.Hostname)"
+            $ingressRules += $hrRule
+            $hrDnsResult = Invoke-Cloudflared @("tunnel", "route", "dns", $tunnelName, $hrRule.Hostname)
+            if ($hrDnsResult.Output) {
+                Write-Host "  $($hrDnsResult.Output)"
+            }
+        }
+    }
+
+    if (Test-Path $CloudflaredConfig) {
+        $backupPath = "$CloudflaredConfig.bak-$(Get-Date -Format 'yyyyMMdd-HHmmss')"
+        Copy-Item $CloudflaredConfig $backupPath -Force
+        Write-Host "  Backed up previous config to $backupPath"
+    }
+
+    Write-TunnelConfig -Path $CloudflaredConfig -TunnelId $tunnelId -CredentialsFile $credentialsFile -IngressRules $ingressRules
     Write-Host "  Wrote $CloudflaredConfig"
 }
 
 function Test-LocalHealth([string]$Port) {
     $uri = "http://127.0.0.1:$Port/health"
-    $deadline = (Get-Date).AddSeconds(30)
+    $deadline = (Get-Date).AddSeconds(60)
     while ((Get-Date) -lt $deadline) {
         try {
-            $response = Invoke-RestMethod -Uri $uri -TimeoutSec 3
+            $response = Invoke-RestMethod -Uri $uri -TimeoutSec 5
             if ($response.status -eq "healthy") {
                 Write-Host "  OK: $uri"
                 return
             }
         } catch {
-            Start-Sleep -Seconds 2
+            Start-Sleep -Seconds 3
         }
     }
-    throw "Middleware health check failed at $uri"
+    throw "Middleware health check failed at $uri. Check logs\service-output.log and logs\service-error.log"
 }
 
 Ensure-Admin
@@ -270,6 +277,8 @@ Write-Host "============================================================" -Foreg
 Write-Host "  Printer Middleware - One-Click Install" -ForegroundColor Green
 Write-Host "============================================================" -ForegroundColor Green
 Write-Host "  Project: $RootDir"
+
+Test-Preflight
 
 Write-Step "Loading site configuration"
 if (-not (Test-Path $SiteEnvPath)) {
@@ -333,11 +342,17 @@ Test-LocalHealth -Port $settings["PORT"]
 Write-Step "Configuring Cloudflare tunnel for $($settings['PUBLIC_HOSTNAME'])"
 Ensure-CloudflareTunnel -Settings $settings
 
+Stop-ManualCloudflaredProcesses
+
 Write-Step "Installing cloudflared Windows service (auto-start on boot)"
 $cloudflaredInstaller = Join-Path $RootDir "install_cloudflared_service.bat"
 if (-not (Test-Path $cloudflaredInstaller)) { throw "Missing $cloudflaredInstaller" }
 & cmd.exe /c "`"$cloudflaredInstaller`""
-if ($LASTEXITCODE -ne 0) { throw "install_cloudflared_service.bat failed with exit code $LASTEXITCODE" }
+if ($LASTEXITCODE -ne 0) {
+    Write-Warning "install_cloudflared_service.bat returned exit code $LASTEXITCODE. Attempting repair..."
+}
+
+Ensure-CloudflaredServiceHealthy -RootDir $RootDir
 
 Start-Sleep -Seconds 3
 Write-Step "Final status"
@@ -345,6 +360,15 @@ Write-Host ""
 sc.exe query PrinterMiddleware
 Write-Host ""
 sc.exe query Cloudflared
+
+$verifyScript = Join-Path $RootDir "scripts\verify_production.ps1"
+if (Test-Path $verifyScript) {
+    Write-Step "Running verification"
+    & powershell.exe -NoProfile -ExecutionPolicy Bypass -File $verifyScript -Port $settings["PORT"] -Hostname $settings["PUBLIC_HOSTNAME"]
+    if ($LASTEXITCODE -ne 0) {
+        Write-Warning "Verification reported issues. See INSTALL_GUIDE.md troubleshooting section."
+    }
+}
 
 Write-Host ""
 Write-Host "============================================================" -ForegroundColor Green

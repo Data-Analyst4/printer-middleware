@@ -94,9 +94,17 @@ Open `http://localhost:5000` in your browser for the monitoring dashboard.
 
 ### Windows Auto-Start and Auto-Restart
 
+**Full installation guide (errors, tunneling, no-Git updates):** [INSTALL_GUIDE.md](INSTALL_GUIDE.md)
+
 For production on a print-site PC (middleware + Cloudflare tunnel, boot start,
 crash restart, public URL `https://r10-print.k95foods.com`), run once as
 Administrator:
+
+```powershell
+.\install.bat
+```
+
+Or:
 
 ```powershell
 .\install_production.bat

@@ -8,14 +8,22 @@ echo ============================================================
 echo   Printer Middleware - One-Click Install
 echo ============================================================
 echo.
+echo   IMPORTANT:
+echo   - Run this from Administrator Command Prompt, OR
+echo   - Right-click install.bat and choose Run as administrator
+echo   - Do NOT rely on git pull if Git is not installed; use fresh ZIP
+echo.
 echo   This will:
 echo     1. Install Python / cloudflared if missing
 echo     2. Create venv and install packages
 echo     3. Install PrinterMiddleware service (auto-start + restart)
 echo     4. Create Cloudflare tunnel for r10-print.k95foods.com
 echo     5. Install cloudflared service (auto-start on boot)
+echo     6. Auto-repair tunnel service if needed
+echo     7. Run verification checks
 echo.
 echo   First run may open a browser for Cloudflare login (one-time).
+echo   Full guide and troubleshooting: INSTALL_GUIDE.md
 echo.
 
 powershell -NoProfile -ExecutionPolicy Bypass -File "%ROOT_DIR%scripts\setup-all.ps1"
