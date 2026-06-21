@@ -238,7 +238,7 @@ function Ensure-CloudflaredServiceHealthy {
     & cmd.exe /c "`"$finishScript`""
     Start-Sleep -Seconds 3
 
-    if (-not (Test-CloudflaredServiceRunning) {
+    if (-not (Test-CloudflaredServiceRunning)) {
         throw "Cloudflared service is still not RUNNING. Run finish_cloudflared_service.bat as Administrator."
     }
 
