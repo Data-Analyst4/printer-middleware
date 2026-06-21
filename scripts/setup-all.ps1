@@ -66,6 +66,8 @@ function Find-InstalledExecutable {
         [string[]]$CandidatePaths
     )
 
+    Refresh-SessionPath
+
     if (Get-Command $Name -ErrorAction SilentlyContinue) {
         return (Get-Command $Name -ErrorAction Stop).Source
     }
@@ -78,6 +80,26 @@ function Find-InstalledExecutable {
             }
             return $candidate
         }
+    }
+
+    if ($Name -eq "cloudflared") {
+        $globMatches = @(
+            Get-ChildItem -Path "${env:ProgramFiles(x86)}\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
+            Get-ChildItem -Path "$env:ProgramFiles\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
+            Get-ChildItem -Path "$env:ProgramFiles*\cloudflared\cloudflared.exe" -ErrorAction SilentlyContinue
+        ) | Select-Object -First 1
+        if ($globMatches) {
+            $parent = Split-Path -Parent $globMatches.FullName
+            if ($env:Path -notlike "*$parent*") {
+                $env:Path = "$parent;$env:Path"
+            }
+            return $globMatches.FullName
+        }
+    }
+
+    $whereOutput = & where.exe $Name 2>$null | Select-Object -First 1
+    if ($whereOutput -and (Test-Path $whereOutput)) {
+        return $whereOutput
     }
 
     return $null
