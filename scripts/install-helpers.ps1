@@ -78,17 +78,16 @@ function Invoke-Python {
 }
 
 function Ensure-PythonRuntime {
-    $python = Resolve-PythonPath
-    if ($python) {
-        Write-Host "  OK: python found at $python"
-        return $python
-    }
-
     $stub = Get-Command python -ErrorAction SilentlyContinue
     if ($stub -and (Test-IsWindowsStorePythonStub -Path $stub.Source)) {
         Write-Host "  Detected Windows Store python alias (not a real install)."
         Write-Host "  Installing Python 3.11..."
     } else {
+        $python = Resolve-PythonPath
+        if ($python) {
+            Write-Host "  OK: python found at $python"
+            return $python
+        }
         Write-Host "  Python not found. Installing Python 3.11..."
     }
 
@@ -108,12 +107,29 @@ function Ensure-PythonRuntime {
         Write-Host $installResult.Output
     }
 
-    Start-Sleep -Seconds 3
+    Start-Sleep -Seconds 5
     Refresh-SessionPath
 
     $python = Resolve-PythonPath
     if (-not $python) {
-        throw "Python is still unavailable after install attempt. Install Python 3.11 manually, disable Settings > Apps > Advanced app settings > App execution aliases for python.exe, then rerun install.bat"
+        $discovered = Get-ChildItem -Path "$env:LocalAppData\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
+            Sort-Object FullName -Descending |
+            Select-Object -First 1
+        if ($discovered -and (Test-RealPythonExecutable -Path $discovered.FullName)) {
+            $python = $discovered.FullName
+        }
+    }
+
+    if (-not $python) {
+        throw @"
+Python is still unavailable after install attempt.
+Fix manually:
+  1) winget install Python.Python.3.11 -e
+  2) Settings > Apps > Advanced app settings > App execution aliases
+     Turn OFF python.exe and python3.exe
+  3) Delete C:\printer-middleware\.venv
+  4) Rerun install.bat
+"@
     }
 
     Write-Host "  OK: python found at $python"
@@ -218,7 +234,14 @@ function Find-InstalledExecutable {
     }
 
     if (Get-Command $Name -ErrorAction SilentlyContinue) {
-        return (Get-Command $Name -ErrorAction Stop).Source
+        $commandPath = (Get-Command $Name -ErrorAction Stop).Source
+        if ($Name -eq "python" -and (Test-IsWindowsStorePythonStub -Path $commandPath)) {
+            return $null
+        }
+        if ($Name -eq "python" -and -not (Test-RealPythonExecutable -Path $commandPath)) {
+            return $null
+        }
+        return $commandPath
     }
 
     foreach ($candidate in $CandidatePaths) {
