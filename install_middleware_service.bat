@@ -13,16 +13,19 @@ if errorlevel 1 (
   exit /b
 )
 
+rem %~dp0 has a trailing backslash. If we pass "C:\path\" to nssm, the \" escapes
+rem the quote and AppDirectory becomes C:\path" (literal quote) -> service exit code 3.
 set "ROOT_DIR=%~dp0"
+if "%ROOT_DIR:~-1%"=="\" set "ROOT_DIR=%ROOT_DIR:~0,-1%"
 cd /d "%ROOT_DIR%"
 
 set "SERVICE_NAME=PrinterMiddleware"
 set "DISPLAY_NAME=Printer Middleware"
 set "PYTHON_EXE=%ROOT_DIR%\.venv\Scripts\python.exe"
-set "APP_SCRIPT=%ROOT_DIR%main.py"
-set "APP_LOG=%ROOT_DIR%logs\service-output.log"
-set "APP_ERR=%ROOT_DIR%logs\service-error.log"
-set "LOCAL_NSSM=%ROOT_DIR%nssm.exe"
+set "APP_SCRIPT=%ROOT_DIR%\main.py"
+set "APP_LOG=%ROOT_DIR%\logs\service-output.log"
+set "APP_ERR=%ROOT_DIR%\logs\service-error.log"
+set "LOCAL_NSSM=%ROOT_DIR%\nssm.exe"
 set "NSSM_EXE=%LOCAL_NSSM%"
 
 if "%~1"=="" (
@@ -55,15 +58,15 @@ if not exist "%APP_SCRIPT%" (
   exit /b 1
 )
 
-if not exist "%ROOT_DIR%logs" mkdir "%ROOT_DIR%logs"
-if not exist "%ROOT_DIR%app\db" mkdir "%ROOT_DIR%app\db"
+if not exist "%ROOT_DIR%\logs" mkdir "%ROOT_DIR%\logs"
+if not exist "%ROOT_DIR%\app\db" mkdir "%ROOT_DIR%\app\db"
 
 rem Local System (Windows service account) must read app + write logs/db.
 rem Per-user Python under %%USERPROFILE%% cannot be used; venv must use Program Files Python.
 icacls "%ROOT_DIR%" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
-icacls "%ROOT_DIR%logs" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
-icacls "%ROOT_DIR%app\db" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
-icacls "%ROOT_DIR%config" /grant "SYSTEM:(OI)(CI)M" /T >nul 2>&1
+icacls "%ROOT_DIR%\logs" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+icacls "%ROOT_DIR%\app\db" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+icacls "%ROOT_DIR%\config" /grant "SYSTEM:(OI)(CI)M" /T >nul 2>&1
 if exist "%ProgramFiles%\Python311" icacls "%ProgramFiles%\Python311" /grant "SYSTEM:(OI)(CI)RX" /T >nul 2>&1
 if exist "%ProgramFiles%\Python312" icacls "%ProgramFiles%\Python312" /grant "SYSTEM:(OI)(CI)RX" /T >nul 2>&1
 
