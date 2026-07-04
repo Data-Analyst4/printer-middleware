@@ -23,20 +23,43 @@ function Test-RealPythonExecutable {
     return ($result.ExitCode -eq 0 -and $result.Output -match "Python 3\.")
 }
 
+function Test-IsUserProfilePython {
+    param([string]$Path)
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return $false
+    }
+
+    # Per-user installs cannot be used by Windows services running as Local System.
+    return ($Path -match "(?i)\\Users\\[^\\]+\\AppData\\")
+}
+
+function Test-IsMachinePython {
+    param([string]$Path)
+
+    if (-not (Test-RealPythonExecutable -Path $Path)) {
+        return $false
+    }
+
+    return -not (Test-IsUserProfilePython -Path $Path)
+}
+
 function Resolve-PythonPath {
+    # Prefer machine-wide Python only. User-profile Python breaks PrinterMiddleware
+    # when NSSM runs the app as Local System (exit 1066 / service exit 3).
     $candidatePaths = @(
-        "$env:LocalAppData\Programs\Python\Python313\python.exe",
-        "$env:LocalAppData\Programs\Python\Python312\python.exe",
-        "$env:LocalAppData\Programs\Python\Python311\python.exe",
-        "$env:LocalAppData\Programs\Python\Python310\python.exe",
         "C:\Program Files\Python313\python.exe",
         "C:\Program Files\Python312\python.exe",
         "C:\Program Files\Python311\python.exe",
-        "C:\Program Files\Python310\python.exe"
+        "C:\Program Files\Python310\python.exe",
+        "C:\Program Files (x86)\Python313\python.exe",
+        "C:\Program Files (x86)\Python312\python.exe",
+        "C:\Program Files (x86)\Python311\python.exe",
+        "C:\Program Files (x86)\Python310\python.exe"
     )
 
     foreach ($candidate in $candidatePaths) {
-        if (Test-RealPythonExecutable -Path $candidate) {
+        if (Test-IsMachinePython -Path $candidate) {
             return $candidate
         }
     }
@@ -45,7 +68,7 @@ function Resolve-PythonPath {
 
     foreach ($commandName in @("python", "python3")) {
         $command = Get-Command $commandName -ErrorAction SilentlyContinue
-        if ($command -and (Test-RealPythonExecutable -Path $command.Source)) {
+        if ($command -and (Test-IsMachinePython -Path $command.Source)) {
             return $command.Source
         }
     }
@@ -53,8 +76,10 @@ function Resolve-PythonPath {
     $pyLauncher = Get-Command py -ErrorAction SilentlyContinue
     if ($pyLauncher) {
         foreach ($versionArg in @("-3.13", "-3.12", "-3.11", "-3.10")) {
-            $result = Invoke-External -FilePath $pyLauncher.Source -ArgumentList @($versionArg, "--version")
-            if ($result.ExitCode -eq 0) {
+            $result = Invoke-External -FilePath $pyLauncher.Source -ArgumentList @(
+                $versionArg, "-c", "import sys; print(sys.base_prefix)"
+            )
+            if ($result.ExitCode -eq 0 -and $result.Output -and -not (Test-IsUserProfilePython -Path $result.Output.Trim())) {
                 return "$($pyLauncher.Source)|$versionArg"
             }
         }
@@ -81,24 +106,39 @@ function Ensure-PythonRuntime {
     $stub = Get-Command python -ErrorAction SilentlyContinue
     if ($stub -and (Test-IsWindowsStorePythonStub -Path $stub.Source)) {
         Write-Host "  Detected Windows Store python alias (not a real install)."
-        Write-Host "  Installing Python 3.11..."
+        Write-Host "  Installing machine-wide Python 3.11 (required for Windows service)..."
     } else {
         $python = Resolve-PythonPath
         if ($python) {
-            Write-Host "  OK: python found at $python"
+            Write-Host "  OK: machine-wide python found at $python"
             return $python
         }
-        Write-Host "  Python not found. Installing Python 3.11..."
+
+        $userPython = Join-Path $env:LocalAppData "Programs\Python\Python311\python.exe"
+        if (Test-RealPythonExecutable -Path $userPython) {
+            Write-Host "  Found per-user Python at $userPython"
+            Write-Host "  That cannot run as Local System. Installing machine-wide Python 3.11..."
+        } else {
+            Write-Host "  Machine-wide Python not found. Installing Python 3.11 for all users..."
+        }
     }
 
     if (-not (Get-Command winget -ErrorAction SilentlyContinue)) {
-        throw "Real Python was not found. Install Python 3.11 from https://www.python.org/downloads/ and check 'Add python.exe to PATH', then rerun install.bat"
+        throw @"
+Machine-wide Python was not found.
+Install Python 3.11 from https://www.python.org/downloads/
+Check BOTH:
+  - Install for all users
+  - Add python.exe to PATH
+Then delete .venv and rerun install.bat
+"@
     }
 
     $installResult = Invoke-External -FilePath "winget" -ArgumentList @(
         "install",
         "--id", "Python.Python.3.11",
         "-e",
+        "--scope", "machine",
         "--accept-source-agreements",
         "--accept-package-agreements",
         "--disable-interactivity"
@@ -112,19 +152,11 @@ function Ensure-PythonRuntime {
 
     $python = Resolve-PythonPath
     if (-not $python) {
-        $discovered = Get-ChildItem -Path "$env:LocalAppData\Programs\Python" -Filter "python.exe" -Recurse -ErrorAction SilentlyContinue |
-            Sort-Object FullName -Descending |
-            Select-Object -First 1
-        if ($discovered -and (Test-RealPythonExecutable -Path $discovered.FullName)) {
-            $python = $discovered.FullName
-        }
-    }
-
-    if (-not $python) {
         throw @"
-Python is still unavailable after install attempt.
+Machine-wide Python is still unavailable after install attempt.
 Fix manually:
-  1) winget install Python.Python.3.11 -e
+  1) winget install Python.Python.3.11 -e --scope machine
+     OR install from python.org with "Install for all users"
   2) Settings > Apps > Advanced app settings > App execution aliases
      Turn OFF python.exe and python3.exe
   3) Delete C:\printer-middleware\.venv
@@ -132,8 +164,82 @@ Fix manually:
 "@
     }
 
-    Write-Host "  OK: python found at $python"
+    Write-Host "  OK: machine-wide python found at $python"
     return $python
+}
+
+function Grant-SystemProjectAccess {
+    param([string]$RootDir)
+
+    $paths = @(
+        $RootDir,
+        (Join-Path $RootDir "logs"),
+        (Join-Path $RootDir "app\db"),
+        (Join-Path $RootDir "config"),
+        (Join-Path $RootDir ".venv"),
+        "C:\Program Files\Python311",
+        "C:\Program Files\Python312",
+        "C:\Program Files\Python313"
+    )
+
+    foreach ($path in $paths) {
+        if (-not (Test-Path $path)) { continue }
+        if ($path -eq $RootDir -or $path -like "*\logs" -or $path -like "*\db" -or $path -like "*\.venv") {
+            & icacls $path /grant "SYSTEM:(OI)(CI)F" /T 2>$null | Out-Null
+        } else {
+            & icacls $path /grant "SYSTEM:(OI)(CI)RX" /T 2>$null | Out-Null
+        }
+    }
+}
+
+function Sync-CloudflaredConfigForSystemService {
+    param([string]$UserCloudflaredDir = (Join-Path $env:USERPROFILE ".cloudflared"))
+
+    $systemCloudflaredDir = "C:\Windows\System32\config\systemprofile\.cloudflared"
+    if (-not (Test-Path $UserCloudflaredDir)) {
+        Write-Warning "User cloudflared config not found at $UserCloudflaredDir"
+        return
+    }
+
+    New-Item -ItemType Directory -Force -Path $systemCloudflaredDir | Out-Null
+    Copy-Item -Path (Join-Path $UserCloudflaredDir "*") -Destination $systemCloudflaredDir -Recurse -Force
+
+    $systemConfig = Join-Path $systemCloudflaredDir "config.yml"
+    if (Test-Path $systemConfig) {
+        $content = Get-Content $systemConfig -Raw
+        # Point credentials-file at the SYSTEM-readable copy (fixes public 1033/530).
+        $updated = [regex]::Replace(
+            $content,
+            "(?im)(credentials-file:\s*).+\\([^\\\r\n]+\.json)\s*",
+            "`${1}$systemCloudflaredDir\`$2"
+        )
+        Set-Content -Path $systemConfig -Value $updated -Encoding UTF8
+
+        $userConfig = Join-Path $UserCloudflaredDir "config.yml"
+        if (Test-Path $userConfig) {
+            Set-Content -Path $userConfig -Value $updated -Encoding UTF8
+        }
+    }
+
+    & icacls $systemCloudflaredDir /grant "SYSTEM:(OI)(CI)F" /T 2>$null | Out-Null
+    Write-Host "  OK: cloudflared config synced for Local System at $systemCloudflaredDir"
+}
+
+function Test-VenvUsesMachinePython {
+    param([string]$VenvPython)
+
+    if (-not (Test-Path $VenvPython)) {
+        return $false
+    }
+
+    $result = Invoke-External -FilePath $VenvPython -ArgumentList @(
+        "-c", "import sys; print(sys.base_prefix)"
+    )
+    if ($result.ExitCode -ne 0 -or -not $result.Output) {
+        return $false
+    }
+
+    return -not (Test-IsUserProfilePython -Path $result.Output.Trim())
 }
 
 function Refresh-SessionPath {

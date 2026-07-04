@@ -150,8 +150,14 @@ function Ensure-Venv {
         Remove-Item $venvDir -Recurse -Force
     }
 
+    # Recreate venv if it was built from per-user Python (service cannot use it).
+    if ((Test-Path $venvPython) -and -not (Test-VenvUsesMachinePython -VenvPython $venvPython)) {
+        Write-Host "  Existing .venv uses per-user Python; recreating with machine-wide Python..."
+        Remove-Item $venvDir -Recurse -Force
+    }
+
     if (-not (Test-Path $venvPython)) {
-        Write-Host "  Creating virtual environment..."
+        Write-Host "  Creating virtual environment with machine-wide Python..."
         $venvResult = Invoke-Python -PythonRef $script:PythonExe -ArgumentList @("-m", "venv", $venvDir)
         if ($venvResult.ExitCode -ne 0) {
             throw "Failed to create virtual environment: $($venvResult.Output)"
@@ -160,6 +166,10 @@ function Ensure-Venv {
 
     if (-not (Test-Path $venvPython)) {
         throw "Virtual environment python was not created at $venvPython"
+    }
+
+    if (-not (Test-VenvUsesMachinePython -VenvPython $venvPython)) {
+        throw "Virtual environment is still linked to per-user Python. Install Python for all users and rerun install.bat."
     }
 
     Write-Host "  Installing Python packages..."
@@ -172,6 +182,9 @@ function Ensure-Venv {
     if ($pipInstall.ExitCode -ne 0) {
         throw "Failed to install Python packages: $($pipInstall.Output)"
     }
+
+    Write-Step "Granting Local System access to app folders"
+    Grant-SystemProjectAccess -RootDir $RootDir
 }
 
 function Ensure-CloudflareTunnel {
@@ -355,6 +368,9 @@ function Finish-TunnelAndCloudflaredInstall {
 
     Write-Step "Configuring Cloudflare tunnel for $($Settings['PUBLIC_HOSTNAME'])"
     Ensure-CloudflareTunnel -Settings $Settings
+
+    Write-Step "Syncing cloudflared config for Local System (fixes public 1033/530)"
+    Sync-CloudflaredConfigForSystemService
 
     Stop-ManualCloudflaredProcesses
 

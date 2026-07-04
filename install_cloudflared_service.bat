@@ -36,6 +36,13 @@ if not exist "%CONFIG_PATH%" (
   exit /b 1
 )
 
+rem Cloudflared service runs as Local System and cannot read %%USERPROFILE%%\.cloudflared.
+rem Copy credentials/config into the SYSTEM profile so the public hostname works (no 1033/530).
+set "SYSTEM_CF_DIR=C:\Windows\System32\config\systemprofile\.cloudflared"
+if not exist "%SYSTEM_CF_DIR%" mkdir "%SYSTEM_CF_DIR%"
+xcopy /E /Y /I /Q "%USERPROFILE%\.cloudflared\*" "%SYSTEM_CF_DIR%\" >nul
+icacls "%SYSTEM_CF_DIR%" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
+
 echo Stopping manual cloudflared processes, if any...
 taskkill /IM cloudflared.exe /F >nul 2>&1
 

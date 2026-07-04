@@ -58,10 +58,14 @@ if not exist "%APP_SCRIPT%" (
 if not exist "%ROOT_DIR%logs" mkdir "%ROOT_DIR%logs"
 if not exist "%ROOT_DIR%app\db" mkdir "%ROOT_DIR%app\db"
 
-rem Local System (Windows service account) must write logs and SQLite DB.
+rem Local System (Windows service account) must read app + write logs/db.
+rem Per-user Python under %%USERPROFILE%% cannot be used; venv must use Program Files Python.
+icacls "%ROOT_DIR%" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
 icacls "%ROOT_DIR%logs" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
 icacls "%ROOT_DIR%app\db" /grant "SYSTEM:(OI)(CI)F" /T >nul 2>&1
 icacls "%ROOT_DIR%config" /grant "SYSTEM:(OI)(CI)M" /T >nul 2>&1
+if exist "%ProgramFiles%\Python311" icacls "%ProgramFiles%\Python311" /grant "SYSTEM:(OI)(CI)RX" /T >nul 2>&1
+if exist "%ProgramFiles%\Python312" icacls "%ProgramFiles%\Python312" /grant "SYSTEM:(OI)(CI)RX" /T >nul 2>&1
 
 if exist "%LOCAL_NSSM%" goto have_nssm
 
