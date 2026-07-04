@@ -1,0 +1,8 @@
+{
+  "template_name": "DEMO",
+  "items_per_minute": 20,
+  "required_data_fields": ["POD1", "POD2"],
+  "max_buffer_size": 500,
+  "ack_mode": "processed",
+  "response_mode": "text"
+}

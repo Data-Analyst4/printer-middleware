@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Printer Middleware v2</title>
+  <style>
+    body { font-family: Segoe UI, sans-serif; margin: 0; background: #0f172a; color: #e2e8f0; }
+    header { padding: 1rem 1.5rem; background: #1e293b; border-bottom: 1px solid #334155; }
+    main { padding: 1.5rem; display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+    .card { background: #1e293b; border: 1px solid #334155; border-radius: 10px; padding: 1rem; }
+    h1, h2 { margin: 0 0 .75rem; }
+    .metric { font-size: 2rem; font-weight: 700; color: #38bdf8; }
+    table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+    th, td { text-align: left; padding: .4rem; border-bottom: 1px solid #334155; }
+    .ok { color: #4ade80; } .bad { color: #f87171; } .warn { color: #fbbf24; }
+    pre { white-space: pre-wrap; word-break: break-word; font-size: .8rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>Printer Middleware v2</h1>
+    <div id="health">Loading...</div>
+  </header>
+  <main>
+    <section class="card"><h2>Queue Metrics</h2><div id="metrics"></div></section>
+    <section class="card"><h2>Printers</h2><div id="printers"></div></section>
+    <section class="card" style="grid-column: 1 / -1"><h2>Recent Items</h2><div id="items"></div></section>
+  </main>
+  <script>
+    async function load() {
+      const [health, metrics, printers, items] = await Promise.all([
+        fetch('/health').then(r => r.json()),
+        fetch('/metrics').then(r => r.json()),
+        fetch('/printers').then(r => r.json()),
+        fetch('/print/items?limit=20').then(r => r.json()),
+      ]);
+
+      document.getElementById('health').innerHTML =
+        `Version ${health.version} · Network ${health.network?.internet_ok ? '<span class="ok">OK</span>' : '<span class="bad">DOWN</span>'} · Queue ${health.queue_enabled ? 'enabled' : 'disabled'}`;
+
+      document.getElementById('metrics').innerHTML = `
+        <div class="metric">${metrics.total_jobs || 0}</div>
+        <div>Queued: ${metrics.queued_jobs || 0} · Processing: ${metrics.processing_jobs || 0}</div>
+        <div>Completed: ${metrics.completed_jobs || 0} · Failed: ${metrics.failed_jobs || 0}</div>
+        <div>Sync jobs: ${metrics.sync_total || 0}</div>`;
+
+      const rows = Object.entries(printers.printers || {}).map(([id, p]) => `
+        <tr>
+          <td>${id}</td>
+          <td>${p.ip}:${p.port}</td>
+          <td>${p.connection_status}</td>
+          <td>${p.queue_size || 0}</td>
+          <td>${p.items_per_minute}/min</td>
+          <td>${p.circuit_breaker || '-'}</td>
+        </tr>`).join('');
+      document.getElementById('printers').innerHTML = rows
+        ? `<table><thead><tr><th>ID</th><th>Target</th><th>Status</th><th>Queue</th><th>Rate</th><th>Circuit</th></tr></thead><tbody>${rows}</tbody></table>`
+        : '<p>No printers registered</p>';
+
+      const itemRows = (items.items || []).slice(0, 15).map(i => `
+        <tr>
+          <td>${i.item_id?.slice(0,8)}...</td>
+          <td>${i.printer_id}</td>
+          <td>${i.status}</td>
+          <td>${i.erp_ref || '-'}</td>
+          <td>${i.created_at || ''}</td>
+        </tr>`).join('');
+      document.getElementById('items').innerHTML = itemRows
+        ? `<table><thead><tr><th>Item</th><th>Printer</th><th>Status</th><th>ERP Ref</th><th>Created</th></tr></thead><tbody>${itemRows}</tbody></table>`
+        : '<p>No queued items yet</p>';
+    }
+    load();
+    setInterval(load, 5000);
+  </script>
+</body>
+</html>

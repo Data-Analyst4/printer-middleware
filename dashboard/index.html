@@ -49,7 +49,34 @@
     </div>
 
     <div class="section">
-        <h2>📋 Recent Jobs</h2>
+        <h2>📷 POD Camera Devices</h2>
+        <p>Configure camera targets that receive concatenated POD values in parallel with printer sends.</p>
+        <form id="pod-device-form" onsubmit="savePodDevice(event)">
+            <label>Device ID <input id="pod-device-id" required placeholder="CAMERA_LINE_A"></label>
+            <label>Name <input id="pod-device-name" placeholder="Line A Camera"></label>
+            <label>IP <input id="pod-device-ip" required placeholder="192.168.1.50"></label>
+            <label>Port <input id="pod-device-port" type="number" required placeholder="9101"></label>
+            <label><input id="pod-device-enabled" type="checkbox" checked> Enabled</label>
+            <button type="submit" class="refresh-btn">Save Device</button>
+        </form>
+        <table id="pod-devices-table" style="margin-top: 15px;">
+            <thead>
+                <tr>
+                    <th>Device ID</th>
+                    <th>Name</th>
+                    <th>IP</th>
+                    <th>Port</th>
+                    <th>Enabled</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody id="pod-devices-body">
+                <tr><td colspan="6">Loading...</td></tr>
+            </tbody>
+        </table>
+    </div>
+
+    <div class="section">
         <table id="jobs-table">
             <thead>
                 <tr>
@@ -123,6 +150,88 @@
             }
         }
 
+        async function loadPodDevices() {
+            try {
+                const response = await fetch('/pod-devices');
+                const data = await response.json();
+                const tbody = document.getElementById('pod-devices-body');
+                const devices = data.devices || {};
+
+                if (Object.keys(devices).length === 0) {
+                    tbody.innerHTML = '<tr><td colspan="6">No POD devices configured</td></tr>';
+                    return;
+                }
+
+                tbody.innerHTML = Object.entries(devices).map(([id, device]) => `
+                    <tr>
+                        <td>${id}</td>
+                        <td>${device.name || id}</td>
+                        <td>${device.ip}</td>
+                        <td>${device.port}</td>
+                        <td>${device.enabled ? 'Yes' : 'No'}</td>
+                        <td>
+                            <button onclick="editPodDevice('${id}')">Edit</button>
+                            <button onclick="deletePodDevice('${id}')">Delete</button>
+                        </td>
+                    </tr>
+                `).join('');
+            } catch (error) {
+                document.getElementById('pod-devices-body').innerHTML =
+                    '<tr><td colspan="6" class="status-failed">Error loading POD devices</td></tr>';
+            }
+        }
+
+        function editPodDevice(deviceId) {
+            fetch(`/pod-devices/${deviceId}`)
+                .then(response => response.json())
+                .then(data => {
+                    if (!data.success) return;
+                    const device = data.device;
+                    document.getElementById('pod-device-id').value = deviceId;
+                    document.getElementById('pod-device-name').value = device.name || deviceId;
+                    document.getElementById('pod-device-ip').value = device.ip;
+                    document.getElementById('pod-device-port').value = device.port;
+                    document.getElementById('pod-device-enabled').checked = !!device.enabled;
+                });
+        }
+
+        async function savePodDevice(event) {
+            event.preventDefault();
+            const deviceId = document.getElementById('pod-device-id').value.trim();
+            const payload = {
+                name: document.getElementById('pod-device-name').value.trim() || deviceId,
+                ip: document.getElementById('pod-device-ip').value.trim(),
+                port: Number(document.getElementById('pod-device-port').value),
+                enabled: document.getElementById('pod-device-enabled').checked
+            };
+
+            const response = await fetch(`/pod-devices/${deviceId}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.error || 'Failed to save POD device');
+                return;
+            }
+
+            document.getElementById('pod-device-form').reset();
+            document.getElementById('pod-device-enabled').checked = true;
+            await loadPodDevices();
+        }
+
+        async function deletePodDevice(deviceId) {
+            if (!confirm(`Delete POD device ${deviceId}?`)) return;
+            const response = await fetch(`/pod-devices/${deviceId}`, { method: 'DELETE' });
+            const result = await response.json();
+            if (!result.success) {
+                alert(result.error || 'Failed to delete POD device');
+                return;
+            }
+            await loadPodDevices();
+        }
+
         async function loadJobs() {
             try {
                 const response = await fetch('/jobs');
@@ -164,6 +273,7 @@
             await Promise.all([
                 loadMetrics(),
                 loadPrinters(),
+                loadPodDevices(),
                 loadJobs()
             ]);
         }

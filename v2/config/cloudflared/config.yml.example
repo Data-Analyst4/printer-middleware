@@ -1,0 +1,7 @@
+tunnel: REPLACE_WITH_TUNNEL_UUID
+credentials-file: C:\Users\YOUR_USER\.cloudflared\REPLACE.json
+
+ingress:
+  - hostname: print-v2.example.com
+    service: http://127.0.0.1:5002
+  - service: http_status:404

@@ -1,0 +1,11 @@
+{
+  "SIM1": {
+    "ip": "127.0.0.1",
+    "port": 9100,
+    "items_per_minute": 20,
+    "required_data_fields": ["POD1", "POD2"],
+    "max_queue_size": 500,
+    "template_name": "DEMO",
+    "enabled": true
+  }
+}

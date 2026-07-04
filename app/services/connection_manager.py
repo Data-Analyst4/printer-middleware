@@ -148,6 +148,12 @@ def _classify_result(
         result["reason"] = "Printer returned NYES (command rejected)"
         return result
 
+    # RQLP reply: RSFP with value "X/Y" and optional data cols
+    if command == "RSFP":
+        result["ok"] = True
+        result["reason"] = result.get("reason") or "RQLP last-print status received"
+        return result
+
     if status in FAILED_STATUS:
         result["ok"] = False
         if protocol_error_code and protocol_error_code in PROTOCOL_ERROR_CODES:

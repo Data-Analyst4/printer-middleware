@@ -6,6 +6,12 @@ from datetime import datetime
 from typing import Any, Dict
 
 from app.services.connection_manager import ConnectionManager
+from app.services.camera_import_forwarder import (
+    forward_camera_import_after_rqlp_async,
+    resolve_camera_target,
+)
+from app.services.pod_device_manager import resolve_pod_target
+from app.services.pod_forwarder import build_pod_string, forward_pod_async, should_forward_pod
 from app.services.printer_protocol import extract_single_command
 from app.utils.logger import log
 from app.utils.validator import validate_request
@@ -152,8 +158,63 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
         f"command={command.get('command')}"
     )
 
+    pod_forward_meta = None
+    if should_forward_pod(command):
+        target, device_id, source = resolve_pod_target(data)
+        if target:
+            pod_string = build_pod_string(command["data"])
+            if pod_string:
+                forward_pod_async(
+                    job_id,
+                    target["ip"],
+                    target["port"],
+                    pod_string,
+                    device_id=device_id,
+                    printer_id=printer_id,
+                )
+                pod_forward_meta = {
+                    "attempted": True,
+                    "device_id": device_id,
+                    "target": f"{target['ip']}:{target['port']}",
+                    "source": source,
+                    "payload_length": len(pod_string),
+                    "status": "sending",
+                }
+                log(
+                    f"POD forward started {job_id}: target={target['ip']}:{target['port']} "
+                    f"source={source} payload_length={len(pod_string)}",
+                    job_id=job_id,
+                    printer_id=printer_id,
+                )
+
     command_result = _send_command(printer_id, command)
     success = command_result["ok"]
+
+    camera_import_meta = None
+    if success and str(command.get("command", "")).upper() == "DATA":
+        cam_url, cam_barcode = resolve_camera_target(data)
+        # Only after DATA ACK: RQLP must confirm last print, then POST camera
+        if cam_url is not None:
+            forward_camera_import_after_rqlp_async(
+                job_id,
+                printer_id,
+                data,
+                command.get("data"),
+            )
+            camera_import_meta = {
+                "attempted": True,
+                "url": cam_url,
+                "barcode": cam_barcode or "",
+                "missing_barcode": not bool(cam_barcode),
+                "status": "awaiting_rqlp",
+                "flow": "data_ack_then_rqlp_then_camera",
+            }
+            log(
+                f"Camera import queued {job_id}: awaiting RQLP last-print confirm "
+                f"barcode={cam_barcode or '(empty)'}",
+                job_id=job_id,
+                printer_id=printer_id,
+            )
 
     result = {
         "success": success,
@@ -176,6 +237,12 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
         "created_at": datetime.now().isoformat(),
         "updated_at": datetime.now().isoformat(),
     }
+
+    if pod_forward_meta:
+        result["pod_forward"] = pod_forward_meta
+
+    if camera_import_meta:
+        result["camera_import"] = camera_import_meta
 
     _store_result(result)
     return result
