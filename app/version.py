@@ -2,11 +2,24 @@
 Printer Middleware - Enterprise-grade printer management system
 """
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
 __version_info__ = tuple(map(int, __version__.split('.')))
 
 # Version history
 VERSION_HISTORY = {
+    "1.2.0": {
+        "date": "2026-07-11",
+        "title": "Immediate camera import",
+        "changes": [
+            "DATA requests POST {barcode, text} to camera URL immediately before printer send",
+            "Camera text built from request POD fields (no RQLP wait)",
+            "Print success remains independent of camera HTTP result",
+            "Response includes erp_alert_recommended and alert_reasons for ERP WhatsApp "
+            "(empty_barcode, camera_http_failure)",
+            "Camera URL from CAMERA_IMPORT_BATCH_URL env or per-request camera_import.url",
+            "Legacy RQLP-after-print flow kept; enable with CAMERA_IMPORT_FLOW=rqlp"
+        ]
+    },
     "1.1.0": {
         "date": "2026-04-08",
         "changes": [

@@ -1,8 +1,18 @@
 """
-POST label data to camera import_batch API only after the printer confirms
-the last printed label via RQLP (RSFP).
+Camera import_batch forwarder.
 
-Payload: { "barcode": "<EAN>", "text": "<col1><col2>..." }
+Default flow (v1.2.0+ "Immediate camera import"):
+  On DATA, POST {barcode, text} to the camera URL immediately (before printer send).
+  Text is built from request POD fields. Print success is independent of camera.
+
+Legacy flow (kept, unused by default):
+  After DATA ACK, RQLP confirm last print, then POST camera.
+  Enable with CAMERA_IMPORT_FLOW=rqlp.
+
+Payload: { "barcode": "<EAN>", "text": "<POD1><POD2>..." }
+
+ERP should check camera_import.erp_alert_recommended and send WhatsApp when
+alert_reasons includes empty_barcode and/or camera_http_failure.
 """
 
 from __future__ import annotations
@@ -24,8 +34,17 @@ DEFAULT_CAMERA_URL = os.getenv(
 )
 CAMERA_IMPORT_ENABLED = os.getenv("CAMERA_IMPORT_ENABLED", "true").lower() == "true"
 CAMERA_IMPORT_TIMEOUT = float(os.getenv("CAMERA_IMPORT_TIMEOUT", "3"))
+# immediate = POST before printer send (default). rqlp = legacy after-print confirm.
+CAMERA_IMPORT_FLOW = os.getenv("CAMERA_IMPORT_FLOW", "immediate").strip().lower()
 RQLP_MAX_ATTEMPTS = max(1, int(os.getenv("CAMERA_RQLP_MAX_ATTEMPTS", "3")))
 RQLP_RETRY_DELAY_S = float(os.getenv("CAMERA_RQLP_RETRY_DELAY_S", "0.15"))
+
+
+def get_camera_import_flow() -> str:
+    """Return active camera flow: 'immediate' (default) or 'rqlp' (legacy)."""
+    if CAMERA_IMPORT_FLOW == "rqlp":
+        return "rqlp"
+    return "immediate"
 
 
 def _col_sort_key(key: str) -> int:
@@ -138,7 +157,7 @@ def resolve_camera_target(request_data: Dict[str, Any]) -> Tuple[Optional[str], 
 
     if not barcode:
         log(
-            "Camera import barcode empty — will forward with barcode=\"\" after RQLP",
+            "Camera import barcode empty — ERP should alert (empty_barcode)",
             level="WARNING",
             extra_data={"camera_import_missing_barcode": True},
         )
@@ -151,8 +170,8 @@ def resolve_camera_import(
     pod_data: Optional[Dict[str, Any]],
 ) -> Tuple[Optional[str], Optional[str], Optional[str]]:
     """
-    Legacy helper: url/barcode/text from request POD only (no RQLP).
-    Prefer verify_last_print_and_forward_camera for production path.
+    Resolve url/barcode/text from request POD (no RQLP).
+    Used by the default immediate camera flow.
     """
     url, barcode = resolve_camera_target(request_data)
     if url is None:
@@ -163,6 +182,88 @@ def resolve_camera_import(
     if not text:
         return None, None, None
     return url, barcode, text
+
+
+def forward_camera_import_immediate(
+    job_id: str,
+    request_data: Dict[str, Any],
+    pod_data: Optional[Dict[str, Any]],
+    *,
+    printer_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Sync: build text from POD and POST camera before printer send.
+
+    Does not raise; always returns meta for the /print response so ERP can
+    WhatsApp on empty_barcode or camera_http_failure.
+    """
+    url, barcode = resolve_camera_target(request_data)
+    meta: Dict[str, Any] = {
+        "attempted": False,
+        "flow": "immediate",
+        "camera_ok": False,
+        "url": url,
+        "barcode": barcode if barcode is not None else "",
+        "missing_barcode": False,
+        "erp_alert_recommended": False,
+        "alert_reasons": [],
+        "status": "skipped",
+        "reason": None,
+        "text_source": "sent_pod",
+        "text_length": 0,
+    }
+
+    if url is None:
+        meta["reason"] = "camera_import not enabled"
+        return meta
+
+    missing_barcode = not bool(barcode)
+    meta["missing_barcode"] = missing_barcode
+    meta["attempted"] = True
+
+    if missing_barcode:
+        meta["alert_reasons"].append("empty_barcode")
+        meta["erp_alert_recommended"] = True
+
+    text = build_pod_string(pod_data if isinstance(pod_data, dict) else {})
+    meta["text_length"] = len(text)
+
+    if not text:
+        meta["status"] = "no_text"
+        meta["reason"] = "no POD text available for camera"
+        log(
+            meta["reason"],
+            level="ERROR",
+            job_id=job_id,
+            printer_id=printer_id,
+            extra_data={"camera_import": meta},
+        )
+        return meta
+
+    camera_result = post_camera_import(url, barcode or "", text)
+    meta["camera"] = camera_result
+    meta["camera_ok"] = bool(camera_result.get("ok"))
+    meta["status"] = "sent" if camera_result.get("ok") else "camera_failed"
+    meta["reason"] = camera_result.get("reason")
+
+    if not camera_result.get("ok"):
+        meta["alert_reasons"].append("camera_http_failure")
+        meta["erp_alert_recommended"] = True
+
+    level = "INFO" if camera_result.get("ok") else "ERROR"
+    log(
+        (
+            f"Immediate camera import "
+            f"{'succeeded' if camera_result.get('ok') else 'failed'} "
+            f"barcode={barcode or '(empty)'} text_len={len(text)} url={url}"
+            f"{' alerts=' + ','.join(meta['alert_reasons']) if meta['alert_reasons'] else ''}"
+        ),
+        level=level,
+        job_id=job_id,
+        printer_id=printer_id,
+        extra_data={"camera_import": meta},
+    )
+    return meta
 
 
 def post_camera_import(url: str, barcode: str, text: str) -> Dict[str, Any]:
@@ -270,8 +371,8 @@ def verify_last_print_and_forward_camera(
     sent_pod_data: Optional[Dict[str, Any]],
 ) -> Dict[str, Any]:
     """
-    RQLP confirm last print, then POST camera.
-    Returns meta dict for API response / logging.
+    Legacy (CAMERA_IMPORT_FLOW=rqlp): RQLP confirm last print, then POST camera.
+    Default production path is forward_camera_import_immediate.
     """
     url, barcode = resolve_camera_target(request_data)
     meta: Dict[str, Any] = {

@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-07-11 — Immediate camera import
+
+### Added
+- **Immediate camera import** (default): on each `DATA` `/print` request with `camera_import.enabled`, middleware POSTs `{barcode, text}` to the camera URL **before** sending the command to the printer
+- Camera text built from request POD fields (`POD1`, `POD2`, …)
+- Response field `camera_import.erp_alert_recommended` plus `alert_reasons` (`empty_barcode`, `camera_http_failure`) so **ERP** can send WhatsApp alerts
+- Env `CAMERA_IMPORT_FLOW=immediate|rqlp` (default `immediate`); legacy RQLP-after-print path retained for rollback
+
+### Changed
+- Default camera path no longer waits for printer ACK or RQLP
+- Print `success` remains based on printer result only; camera failure does not fail the print job
+- Camera URL: `CAMERA_IMPORT_BATCH_URL` env, overridable per request via `camera_import.url` (ERP UI)
+
+### Unchanged (kept for later)
+- Full RQLP confirm → camera flow still in code; set `CAMERA_IMPORT_FLOW=rqlp` to use it
+
 ## [1.1.0] - 2026-04-08
 
 ### Added

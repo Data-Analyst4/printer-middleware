@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Smoke-test middleware /print with camera_import — no ERP UI required.
+Smoke-test middleware /print with immediate camera_import (v1.2.0) — no ERP UI required.
 
 Prerequisites:
   1. Middleware running (e.g. python main.py / start.bat)
@@ -10,6 +10,9 @@ Prerequisites:
 Usage:
   python scripts/smoke_print_with_camera.py
   python scripts/smoke_print_with_camera.py --middleware http://127.0.0.1:8000 --printer-ip 127.0.0.1 --printer-port 9100
+
+Expected: camera POST happens before printer DATA; response.camera_import.flow == "immediate".
+If erp_alert_recommended is true, ERP should WhatsApp (empty_barcode / camera_http_failure).
 """
 
 from __future__ import annotations
@@ -86,8 +89,12 @@ def main():
     })
     print(json.dumps(result, indent=2))
     print("\nExpected camera text:", "".join(pod[k] for k in sorted(pod, key=lambda x: int(x[3:]))))
-    if result.get("camera_import"):
-        print("Middleware camera_import meta:", result["camera_import"])
+    cam = result.get("camera_import")
+    if cam:
+        print("Middleware camera_import meta:", cam)
+        print("flow:", cam.get("flow"), "camera_ok:", cam.get("camera_ok"),
+              "erp_alert_recommended:", cam.get("erp_alert_recommended"),
+              "alert_reasons:", cam.get("alert_reasons"))
     else:
         print("WARNING: no camera_import in response — check middleware branch / logs")
 

@@ -2,7 +2,7 @@
 
 **Enterprise-grade printer management system with async processing, persistent storage, and real-time monitoring**
 
-[![Version](https://img.shields.io/badge/version-1.1.0-blue.svg)](https://github.com/yourusername/printer-middleware/releases)
+[![Version](https://img.shields.io/badge/version-1.2.0-blue.svg)](https://github.com/yourusername/printer-middleware/releases)
 [![Python](https://img.shields.io/badge/python-3.8+-blue.svg)](https://www.python.org/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](https://opensource.org/licenses/MIT)
 
@@ -37,16 +37,16 @@ pip install -r requirements.txt
 
 ```bash
 # Download specific version via git tags
-git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.2.0 https://github.com/yourusername/printer-middleware.git
 
 # Or download ZIP from GitHub releases
-# https://github.com/yourusername/printer-middleware/releases/tag/v1.1.0
+# https://github.com/yourusername/printer-middleware/releases/tag/v1.2.0
 ```
 
 ### Option 3: Install via pip (when published)
 
 ```bash
-pip install printer-middleware==1.1.0
+pip install printer-middleware==1.2.0
 ```
 
 ---
@@ -165,6 +165,64 @@ Manual middleware-only install (no tunnel):
 
 ---
 
+## 📷 Camera import (v1.2.0 — Immediate camera import)
+
+On each ERP `POST /print` with command `DATA` and `camera_import.enabled: true`, the middleware:
+
+1. Builds `text` from POD fields in the request
+2. POSTs `{ "barcode": "...", "text": "..." }` to the camera URL **immediately** (before printer send)
+3. Sends the DATA command to the printer
+4. Returns print success based on the printer only
+
+WhatsApp alerts are **not** sent by middleware — ERP should read the response and notify assigned numbers.
+
+### Request (ERP / UI)
+
+```json
+{
+  "printer_id": "P1",
+  "printer": { "ip": "192.168.1.100", "port": 2030 },
+  "command": {
+    "command": "DATA",
+    "data": { "POD1": "95.00", "POD2": "BATCH" }
+  },
+  "camera_import": {
+    "enabled": true,
+    "barcode": "8906164010577",
+    "url": "http://192.168.0.68:5001/api/import_batch"
+  }
+}
+```
+
+- `camera_import.url` — optional; overrides env `CAMERA_IMPORT_BATCH_URL` (use an ERP UI field for this)
+- Only `DATA` triggers camera; `STAR` / `STOP` / etc. do not
+
+### Response fields for ERP WhatsApp
+
+| Field | Meaning |
+|-------|---------|
+| `camera_import.erp_alert_recommended` | `true` → ERP should WhatsApp |
+| `camera_import.alert_reasons` | `empty_barcode` and/or `camera_http_failure` |
+| `camera_import.camera_ok` | Camera HTTP succeeded |
+| `camera_import.flow` | `"immediate"` (default) |
+
+Print `success` can still be `true` when camera failed — check `erp_alert_recommended` separately.
+
+### Environment
+
+| Variable | Default | Purpose |
+|----------|---------|---------|
+| `CAMERA_IMPORT_ENABLED` | `true` | Global kill switch |
+| `CAMERA_IMPORT_BATCH_URL` | `http://192.168.0.68:5001/api/import_batch` | Default camera URL |
+| `CAMERA_IMPORT_TIMEOUT` | `3` | Camera HTTP timeout (seconds) |
+| `CAMERA_IMPORT_FLOW` | `immediate` | `immediate` or legacy `rqlp` |
+
+Legacy RQLP-after-print flow is kept in code; set `CAMERA_IMPORT_FLOW=rqlp` only if you need to roll back.
+
+Smoke test: `python scripts/smoke_print_with_camera.py` (optional mock: `python scripts/mock_camera_import.py`).
+
+---
+
 ## 📋 API Endpoints
 
 | Method | Endpoint | Description |
@@ -223,7 +281,7 @@ curl http://localhost:5000/job/550e8400-e29b-41d4-a716-446655440000
 
 ## 🔄 Version Management
 
-### Current Version: v1.1.0
+### Current Version: v1.2.0 — Immediate camera import
 
 This project uses [Semantic Versioning](https://semver.org/):
 
@@ -243,11 +301,11 @@ See [CHANGELOG.md](CHANGELOG.md) for detailed version history.
 git tag -l
 
 # Download specific version
-git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
+git clone --branch v1.2.0 https://github.com/yourusername/printer-middleware.git
 cd printer-middleware
 
 # Or checkout in existing repo
-git checkout tags/v1.1.0
+git checkout tags/v1.2.0
 ```
 
 #### Via GitHub Releases
@@ -257,7 +315,7 @@ git checkout tags/v1.1.0
 
 #### Via pip (when published to PyPI)
 ```bash
-pip install printer-middleware==1.1.0
+pip install printer-middleware==1.2.0
 ```
 
 ---

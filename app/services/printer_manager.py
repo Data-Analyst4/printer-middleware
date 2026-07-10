@@ -8,6 +8,8 @@ from typing import Any, Dict
 from app.services.connection_manager import ConnectionManager
 from app.services.camera_import_forwarder import (
     forward_camera_import_after_rqlp_async,
+    forward_camera_import_immediate,
+    get_camera_import_flow,
     resolve_camera_target,
 )
 from app.services.pod_device_manager import resolve_pod_target
@@ -187,13 +189,26 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
                     printer_id=printer_id,
                 )
 
+    # Default (v1.2.0): camera POST before printer send. Legacy RQLP after ACK.
+    camera_import_meta = None
+    cmd_name = str(command.get("command", "")).upper()
+    camera_flow = get_camera_import_flow()
+    if cmd_name == "DATA" and camera_flow == "immediate":
+        cam_url, _cam_barcode = resolve_camera_target(data)
+        if cam_url is not None:
+            camera_import_meta = forward_camera_import_immediate(
+                job_id,
+                data,
+                command.get("data"),
+                printer_id=printer_id,
+            )
+
     command_result = _send_command(printer_id, command)
     success = command_result["ok"]
 
-    camera_import_meta = None
-    if success and str(command.get("command", "")).upper() == "DATA":
+    if success and cmd_name == "DATA" and camera_flow == "rqlp":
         cam_url, cam_barcode = resolve_camera_target(data)
-        # Only after DATA ACK: RQLP must confirm last print, then POST camera
+        # Legacy: after DATA ACK, RQLP confirm then POST camera (kept for rollback)
         if cam_url is not None:
             forward_camera_import_after_rqlp_async(
                 job_id,
@@ -207,7 +222,9 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
                 "barcode": cam_barcode or "",
                 "missing_barcode": not bool(cam_barcode),
                 "status": "awaiting_rqlp",
-                "flow": "data_ack_then_rqlp_then_camera",
+                "flow": "rqlp",
+                "erp_alert_recommended": not bool(cam_barcode),
+                "alert_reasons": (["empty_barcode"] if not cam_barcode else []),
             }
             log(
                 f"Camera import queued {job_id}: awaiting RQLP last-print confirm "
