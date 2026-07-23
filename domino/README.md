@@ -11,7 +11,15 @@ This is **not** the Rynan middleware — keep both apps and URLs independent.
 | Printer protocol | JSON `STAR` / `DATA` over TCP ~2030 | Codenet bytes over TCP **7000** |
 | ERP printer config URL | Rynan URL | **Domino URL (different)** |
 
-## Quick start
+## Quick start (one-click on a site PC)
+
+**Right-click** [`install.bat`](install.bat) → **Run as administrator**
+
+That installs Python (if needed), `.venv`, and Windows service **`DominoPrinterMiddleware`** on port **5003**.
+
+Full steps: [INSTALL_GUIDE.md](INSTALL_GUIDE.md)
+
+### Manual start (dev)
 
 ```powershell
 cd domino
