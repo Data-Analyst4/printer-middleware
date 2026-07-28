@@ -4,30 +4,92 @@ from __future__ import annotations
 
 import os
 
-from flask import Blueprint, jsonify, request, send_file
+from flask import Blueprint, jsonify, redirect, request, send_file
 
 from app.core.bootstrap import get_context
+from app.utils.auth import (
+    PUBLIC_PATHS,
+    dashboard_auth_enabled,
+    login_user,
+    logout_user,
+    request_authorized,
+    session_authenticated,
+    verify_dashboard_credentials,
+)
 from app.version import get_version_info
 
 api = Blueprint("api", __name__)
 
 
-def _check_api_key() -> bool:
-    ctx = get_context()
-    expected = ctx.settings.api_key
-    if not expected:
-        return True
-    provided = request.headers.get("X-API-Key") or request.args.get("api_key")
-    return provided == expected
+def _dashboard_dir() -> str:
+    return os.path.abspath(
+        os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "dashboard")
+    )
+
+
+def _wants_html() -> bool:
+    best = request.accept_mimetypes.best_match(["application/json", "text/html"])
+    return best == "text/html" and (
+        request.accept_mimetypes["text/html"] >= request.accept_mimetypes["application/json"]
+    )
 
 
 @api.before_request
 def _auth_guard():
-    if request.path in {"/health", "/version", "/"}:
+    path = request.path
+    if path in PUBLIC_PATHS or path == "/logout":
         return None
-    if not _check_api_key():
-        return jsonify({"success": False, "error": "Unauthorized"}), 401
-    return None
+
+    if request_authorized(request):
+        return None
+
+    if dashboard_auth_enabled() and (path == "/" or _wants_html()):
+        return redirect("/login")
+    return jsonify({"success": False, "error": "Unauthorized"}), 401
+
+
+@api.route("/login", methods=["GET", "POST"])
+def login():
+    if not dashboard_auth_enabled():
+        return redirect("/")
+
+    if request.method == "GET":
+        if session_authenticated():
+            return redirect("/")
+        return send_file(os.path.join(_dashboard_dir(), "login.html"))
+
+    data = request.get_json(silent=True)
+    if isinstance(data, dict):
+        username = str(data.get("username") or "")
+        password = str(data.get("password") or "")
+    else:
+        username = request.form.get("username", "")
+        password = request.form.get("password", "")
+
+    if not verify_dashboard_credentials(username, password):
+        if request.is_json or request.accept_mimetypes.best == "application/json":
+            return jsonify({"success": False, "error": "Invalid username or password"}), 401
+        return redirect("/login?error=1")
+
+    login_user(username.strip())
+    if request.is_json or (
+        request.accept_mimetypes.best == "application/json"
+        and request.accept_mimetypes["application/json"] > request.accept_mimetypes["text/html"]
+    ):
+        return jsonify({"success": True})
+    return redirect("/")
+
+
+@api.route("/logout", methods=["GET", "POST"])
+def logout():
+    logout_user()
+    if request.method == "POST" and (
+        request.is_json or request.accept_mimetypes.best == "application/json"
+    ):
+        return jsonify({"success": True})
+    if dashboard_auth_enabled():
+        return redirect("/login")
+    return redirect("/")
 
 
 @api.route("/health", methods=["GET"])
@@ -111,5 +173,4 @@ def metrics():
 
 @api.route("/")
 def dashboard():
-    dashboard_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "dashboard", "index.html")
-    return send_file(os.path.abspath(dashboard_path))
+    return send_file(os.path.join(_dashboard_dir(), "index.html"))

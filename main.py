@@ -6,11 +6,13 @@ Printer Middleware - Enterprise-grade printer management system
 import sys
 import argparse
 import os
+from datetime import timedelta
 from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
 from app.api.routes import api
 from app.version import get_version, get_version_info
+from app.utils.auth import api_key_expected, dashboard_auth_enabled, flask_secret_key
 from app.utils.logger import log
 
 def create_app():
@@ -18,8 +20,13 @@ def create_app():
     load_dotenv()
 
     app = Flask(__name__)
+    app.secret_key = flask_secret_key()
+    app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+
     cors_origins = os.getenv("CORS_ORIGINS", "*")
-    CORS(app, origins=cors_origins)
+    CORS(app, origins=cors_origins, supports_credentials=True)
 
     # Register blueprints
     app.register_blueprint(api)
@@ -28,6 +35,17 @@ def create_app():
     @app.route("/version")
     def version():
         return get_version_info()
+
+    if dashboard_auth_enabled():
+        log("Dashboard login enabled (DASHBOARD_USER / DASHBOARD_PASSWORD)")
+        if not api_key_expected():
+            log(
+                "API_KEY is not set - ERP/print clients must use a logged-in session "
+                "or set API_KEY for machine access",
+                level="WARNING",
+            )
+    elif api_key_expected():
+        log("API key auth enabled (API_KEY)")
 
     return app
 

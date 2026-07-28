@@ -48,6 +48,9 @@ class Settings:
     persist_printers: bool = True
     printer_allowlist_only: bool = False
     api_key: Optional[str] = None
+    dashboard_user: Optional[str] = None
+    dashboard_password: Optional[str] = None
+    secret_key: Optional[str] = None
 
     connect_timeout: float = 5.0
     read_timeout: float = 5.0
@@ -84,6 +87,9 @@ class Settings:
             persist_printers=_env_bool("PERSIST_PRINTERS", True),
             printer_allowlist_only=_env_bool("PRINTER_ALLOWLIST_ONLY", False),
             api_key=os.getenv("API_KEY") or None,
+            dashboard_user=(os.getenv("DASHBOARD_USER") or "").strip() or None,
+            dashboard_password=os.getenv("DASHBOARD_PASSWORD") or None,
+            secret_key=(os.getenv("SECRET_KEY") or "").strip() or None,
             connect_timeout=_env_float("PRINTER_CONNECT_TIMEOUT", 5.0),
             read_timeout=_env_float("PRINTER_READ_TIMEOUT", 5.0),
             idle_timeout=_env_float("PRINTER_IDLE_TIMEOUT", 0.4),

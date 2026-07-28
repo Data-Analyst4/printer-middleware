@@ -145,7 +145,9 @@ Environment (`config/app.env` or NSSM service env):
 | `PRINTER_SEND_RETRIES` | 3 | TCP retry attempts |
 | `PRINTER_READ_TIMEOUT` | 5 | Socket read timeout |
 | `DEFAULT_ITEMS_PER_MINUTE` | 20 | Queue consumer rate |
-| `API_KEY` | (none) | Optional `X-API-Key` header |
+| `API_KEY` | (none) | Optional `X-API-Key` for ERP/machine clients |
+| `DASHBOARD_USER` / `DASHBOARD_PASSWORD` | (none) | Enable username/password login for the dashboard |
+| `SECRET_KEY` | derived | Flask session secret (set in production) |
 | `PRINTER_ALLOWLIST_ONLY` | false | Reject unknown printer targets |
 
 ---

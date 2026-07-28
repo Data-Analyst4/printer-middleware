@@ -24,6 +24,7 @@
     <h1>🖨️ Printer Middleware Dashboard</h1>
 
     <button class="refresh-btn" onclick="loadAllData()">🔄 Refresh All</button>
+    <button class="refresh-btn" style="background:#6c757d;margin-left:8px;" onclick="logout()">Logout</button>
 
     <div class="section">
         <h2>📊 System Metrics</h2>
@@ -107,9 +108,22 @@
             }
         }
 
+        async function ensureAuthorized(response) {
+            if (response.status === 401) {
+                window.location.href = '/login';
+                throw new Error('Unauthorized');
+            }
+            return response;
+        }
+
+        async function logout() {
+            await fetch('/logout', { method: 'POST', headers: { 'Accept': 'application/json' } });
+            window.location.href = '/login';
+        }
+
         async function loadMetrics() {
             try {
-                const response = await fetch('/metrics');
+                const response = await ensureAuthorized(await fetch('/metrics'));
                 const data = await response.json();
                 document.getElementById('metrics').innerHTML = `
                     <p><strong>Total Jobs:</strong> ${data.total_jobs}</p>
@@ -125,7 +139,7 @@
 
         async function loadPrinters() {
             try {
-                const response = await fetch('/printers');
+                const response = await ensureAuthorized(await fetch('/printers'));
                 const printers = await response.json();
                 const tbody = document.getElementById('printers-body');
 
@@ -152,7 +166,7 @@
 
         async function loadPodDevices() {
             try {
-                const response = await fetch('/pod-devices');
+                const response = await ensureAuthorized(await fetch('/pod-devices'));
                 const data = await response.json();
                 const tbody = document.getElementById('pod-devices-body');
                 const devices = data.devices || {};
@@ -183,6 +197,7 @@
 
         function editPodDevice(deviceId) {
             fetch(`/pod-devices/${deviceId}`)
+                .then(response => ensureAuthorized(response))
                 .then(response => response.json())
                 .then(data => {
                     if (!data.success) return;
@@ -205,11 +220,11 @@
                 enabled: document.getElementById('pod-device-enabled').checked
             };
 
-            const response = await fetch(`/pod-devices/${deviceId}`, {
+            const response = await ensureAuthorized(await fetch(`/pod-devices/${deviceId}`, {
                 method: 'PUT',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify(payload)
-            });
+            }));
             const result = await response.json();
             if (!result.success) {
                 alert(result.error || 'Failed to save POD device');
@@ -223,7 +238,9 @@
 
         async function deletePodDevice(deviceId) {
             if (!confirm(`Delete POD device ${deviceId}?`)) return;
-            const response = await fetch(`/pod-devices/${deviceId}`, { method: 'DELETE' });
+            const response = await ensureAuthorized(
+                await fetch(`/pod-devices/${deviceId}`, { method: 'DELETE' })
+            );
             const result = await response.json();
             if (!result.success) {
                 alert(result.error || 'Failed to delete POD device');
@@ -234,7 +251,7 @@
 
         async function loadJobs() {
             try {
-                const response = await fetch('/jobs');
+                const response = await ensureAuthorized(await fetch('/jobs'));
                 const data = await response.json();
                 const jobs = data.jobs.slice(-10); // Show last 10 jobs
                 const tbody = document.getElementById('jobs-body');
@@ -261,7 +278,7 @@
 
         async function viewJobDetails(jobId) {
             try {
-                const response = await fetch(`/job/${jobId}`);
+                const response = await ensureAuthorized(await fetch(`/job/${jobId}`));
                 const job = await response.json();
                 alert(`Job Details:\n\nID: ${job.job_id}\nStatus: ${job.status}\nPrinter: ${job.printer_id}\nResponses: ${job.responses.join(', ')}\nError: ${job.error || 'None'}`);
             } catch (error) {

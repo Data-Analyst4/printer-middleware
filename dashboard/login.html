@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login — Printer Middleware</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #f5f7fa;
+        }
+        .box {
+            width: 100%;
+            max-width: 360px;
+            background: #fff;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            padding: 24px;
+            box-shadow: 0 2px 8px rgba(0,0,0,.06);
+        }
+        h1 { margin: 0 0 8px; font-size: 1.35rem; }
+        p { margin: 0 0 18px; color: #666; font-size: .95rem; }
+        label { display: block; margin: 12px 0 4px; font-size: .9rem; }
+        input {
+            width: 100%;
+            box-sizing: border-box;
+            padding: 10px;
+            border: 1px solid #ccc;
+            border-radius: 5px;
+            font-size: 1rem;
+        }
+        button {
+            width: 100%;
+            margin-top: 18px;
+            background: #007bff;
+            color: #fff;
+            border: none;
+            padding: 12px;
+            border-radius: 5px;
+            font-size: 1rem;
+            cursor: pointer;
+        }
+        button:hover { background: #0056b3; }
+        .error {
+            background: #fdecea;
+            color: #b71c1c;
+            border: 1px solid #f5c2c0;
+            border-radius: 5px;
+            padding: 10px;
+            margin-bottom: 12px;
+            font-size: .9rem;
+            display: none;
+        }
+    </style>
+</head>
+<body>
+    <div class="box">
+        <h1>Printer Middleware</h1>
+        <p>Sign in to open the dashboard</p>
+        <div id="error" class="error"></div>
+        <form id="login-form">
+            <label for="username">Username</label>
+            <input id="username" name="username" autocomplete="username" required autofocus>
+            <label for="password">Password</label>
+            <input id="password" name="password" type="password" autocomplete="current-password" required>
+            <button type="submit">Sign in</button>
+        </form>
+    </div>
+    <script>
+        const params = new URLSearchParams(window.location.search);
+        const errorEl = document.getElementById('error');
+        if (params.get('error')) {
+            errorEl.style.display = 'block';
+            errorEl.textContent = 'Invalid username or password';
+        }
+
+        document.getElementById('login-form').addEventListener('submit', async (event) => {
+            event.preventDefault();
+            errorEl.style.display = 'none';
+            const username = document.getElementById('username').value;
+            const password = document.getElementById('password').value;
+            try {
+                const response = await fetch('/login', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
+                    body: JSON.stringify({ username, password })
+                });
+                const data = await response.json().catch(() => ({}));
+                if (!response.ok || !data.success) {
+                    errorEl.style.display = 'block';
+                    errorEl.textContent = data.error || 'Invalid username or password';
+                    return;
+                }
+                window.location.href = '/';
+            } catch (err) {
+                errorEl.style.display = 'block';
+                errorEl.textContent = 'Login failed. Please try again.';
+            }
+        });
+    </script>
+</body>
+</html>
