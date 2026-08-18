@@ -12,18 +12,26 @@ from flask_cors import CORS
 from dotenv import load_dotenv
 from app.api.routes import api
 from app.version import get_version, get_version_info
+from app.services.user_manager import count_users, ensure_seed_admin
 from app.utils.auth import api_key_expected, dashboard_auth_enabled, flask_secret_key
 from app.utils.logger import log
 
 def create_app():
     """Create and configure the Flask application"""
-    load_dotenv()
+    root_dir = os.path.dirname(os.path.abspath(__file__))
+    # Production installs keep settings in config/site.env; optional .env overrides for local dev.
+    load_dotenv(os.path.join(root_dir, "config", "site.env"))
+    load_dotenv(os.path.join(root_dir, ".env"), override=True)
 
     app = Flask(__name__)
     app.secret_key = flask_secret_key()
     app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
     app.config["SESSION_COOKIE_HTTPONLY"] = True
     app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+    # Isolate cookies when multiple instances share 127.0.0.1 on different ports.
+    cookie_name = (os.getenv("SESSION_COOKIE_NAME") or "").strip()
+    if cookie_name:
+        app.config["SESSION_COOKIE_NAME"] = cookie_name
 
     cors_origins = os.getenv("CORS_ORIGINS", "*")
     CORS(app, origins=cors_origins, supports_credentials=True)
@@ -36,8 +44,12 @@ def create_app():
     def version():
         return get_version_info()
 
+    seeded = ensure_seed_admin()
+    if seeded:
+        log(f"Seeded admin user '{seeded.get('username')}' from DASHBOARD_USER")
+
     if dashboard_auth_enabled():
-        log("Dashboard login enabled (DASHBOARD_USER / DASHBOARD_PASSWORD)")
+        log(f"Dashboard login enabled ({count_users()} user(s) in database)")
         if not api_key_expected():
             log(
                 "API_KEY is not set - ERP/print clients must use a logged-in session "
@@ -86,8 +98,25 @@ def main():
     else:
         from waitress import serve
 
-        log("Using Waitress WSGI server (Windows service mode)")
-        serve(app, host=args.host, port=args.port, threads=8)
+        # ERP clients can flood concurrent RQLP/status polls. Keep enough worker
+        # threads and expire idle channels so one slow printer cannot freeze the API.
+        threads = max(8, int(os.getenv("WAITRESS_THREADS", "32")))
+        connection_limit = max(threads * 2, int(os.getenv("WAITRESS_CONNECTION_LIMIT", "200")))
+        channel_timeout = max(30, int(os.getenv("WAITRESS_CHANNEL_TIMEOUT", "60")))
+        log(
+            "Using Waitress WSGI server (Windows service mode) "
+            f"threads={threads} connection_limit={connection_limit} "
+            f"channel_timeout={channel_timeout}s"
+        )
+        serve(
+            app,
+            host=args.host,
+            port=args.port,
+            threads=threads,
+            connection_limit=connection_limit,
+            channel_timeout=channel_timeout,
+            cleanup_interval=max(10, channel_timeout // 2),
+        )
 
 if __name__ == "__main__":
     main()

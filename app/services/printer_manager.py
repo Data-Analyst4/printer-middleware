@@ -84,18 +84,28 @@ def _build_metrics() -> Dict[str, int]:
     return {"total": total, "completed": completed, "failed": failed}
 
 
+def _lock_timeout_for_command(command: Dict[str, Any]) -> float:
+    """Status polls fail fast; print DATA may wait longer for the printer lock."""
+    cmd = str(command.get("command", "")).upper()
+    if cmd in {"RQLP", "RSAL", "RSST", "RQST", "RQAL"}:
+        return float(os.getenv("PRINTER_STATUS_LOCK_TIMEOUT", "0.5"))
+    return float(os.getenv("PRINTER_DATA_LOCK_TIMEOUT", "15"))
+
+
 def _send_command(printer_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
     printer = PRINTERS[printer_id]
     connection: ConnectionManager = printer["connection"]
+    lock_timeout = _lock_timeout_for_command(command)
 
     for attempt in range(1, SEND_RETRIES + 1):
         try:
-            response = connection.send_command(command)
+            response = connection.send_command(command, lock_timeout=lock_timeout)
             result = {
                 "attempt": attempt,
                 "command": command,
                 "ok": response.get("ok", False),
                 "reason": response.get("reason"),
+                "error_type": response.get("error_type"),
                 "response_command": response.get("response_command"),
                 "response_status": response.get("response_status"),
                 "protocol_error_code": response.get("protocol_error_code"),
@@ -104,6 +114,10 @@ def _send_command(printer_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
                 "response": response.get("response"),
                 "details": response,
             }
+
+            if response.get("error_type") == "printer_busy":
+                printer["last_status"] = "busy"
+                return result
 
             printer["last_status"] = "connected" if result["ok"] else "error"
             if result["ok"] or attempt >= SEND_RETRIES:

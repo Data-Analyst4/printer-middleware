@@ -1,3 +1,5 @@
+from functools import wraps
+
 from flask import Blueprint, request, jsonify, redirect, send_file
 
 from app.services.pod_device_manager import (
@@ -13,13 +15,23 @@ from app.services.printer_manager import (
     get_all_jobs,
     get_metrics
 )
+from app.services.user_manager import (
+    create_user,
+    delete_user,
+    ensure_seed_admin,
+    list_users,
+    update_user,
+)
 from app.utils.auth import (
     PUBLIC_PATHS,
+    current_session_user,
     dashboard_auth_enabled,
+    is_admin,
     login_user,
     logout_user,
     request_authorized,
     session_authenticated,
+    session_user_id,
     verify_dashboard_credentials,
 )
 
@@ -31,6 +43,32 @@ def _wants_html() -> bool:
     return best == "text/html" and (
         request.accept_mimetypes["text/html"] >= request.accept_mimetypes["application/json"]
     )
+
+
+def _wants_json() -> bool:
+    if request.is_json:
+        return True
+    return (
+        request.accept_mimetypes.best == "application/json"
+        and request.accept_mimetypes["application/json"]
+        > request.accept_mimetypes["text/html"]
+    )
+
+
+def admin_required(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        if not dashboard_auth_enabled():
+            return jsonify({
+                "success": False,
+                "error": "User management requires dashboard auth. "
+                         "Set DASHBOARD_USER and DASHBOARD_PASSWORD, then restart.",
+            }), 403
+        if not session_authenticated() or not is_admin():
+            return jsonify({"success": False, "error": "Admin access required"}), 403
+        return fn(*args, **kwargs)
+
+    return wrapper
 
 
 @api.before_request
@@ -49,6 +87,8 @@ def _auth_guard():
 
 @api.route("/login", methods=["GET", "POST"])
 def login():
+    ensure_seed_admin()
+
     if not dashboard_auth_enabled():
         return redirect("/")
 
@@ -65,30 +105,105 @@ def login():
         username = request.form.get("username", "")
         password = request.form.get("password", "")
 
-    if not verify_dashboard_credentials(username, password):
-        if request.is_json or request.accept_mimetypes.best == "application/json":
+    user = verify_dashboard_credentials(username, password)
+    if not user:
+        if _wants_json():
             return jsonify({"success": False, "error": "Invalid username or password"}), 401
         return redirect("/login?error=1")
 
-    login_user(username.strip())
-    if request.is_json or (
-        request.accept_mimetypes.best == "application/json"
-        and request.accept_mimetypes["application/json"] > request.accept_mimetypes["text/html"]
-    ):
-        return jsonify({"success": True})
+    login_user(user["username"], role=user.get("role") or "admin", user_id=user.get("id"))
+    if _wants_json():
+        return jsonify({
+            "success": True,
+            "user": {
+                "id": user.get("id"),
+                "username": user["username"],
+                "role": user.get("role") or "admin",
+            },
+        })
     return redirect("/")
 
 
 @api.route("/logout", methods=["GET", "POST"])
 def logout():
     logout_user()
-    if request.method == "POST" and (
-        request.is_json or request.accept_mimetypes.best == "application/json"
-    ):
+    if request.method == "POST" and _wants_json():
         return jsonify({"success": True})
     if dashboard_auth_enabled():
         return redirect("/login")
     return redirect("/")
+
+
+@api.route("/api/me", methods=["GET"])
+def me():
+    if not dashboard_auth_enabled():
+        return jsonify({
+            "success": True,
+            "auth_enabled": False,
+            "user": None,
+        })
+    user = current_session_user()
+    if not user:
+        return jsonify({"success": False, "error": "Unauthorized"}), 401
+    return jsonify({"success": True, "auth_enabled": True, "user": user})
+
+
+@api.route("/api/users", methods=["GET"])
+@admin_required
+def api_list_users():
+    return jsonify({"success": True, "users": list_users()})
+
+
+@api.route("/api/users", methods=["POST"])
+@admin_required
+def api_create_user():
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Invalid JSON payload"}), 400
+
+    result = create_user(
+        username=str(data.get("username") or ""),
+        password=str(data.get("password") or ""),
+        role=str(data.get("role") or "operator"),
+    )
+    if not result.get("success"):
+        return jsonify(result), 400
+    return jsonify(result), 201
+
+
+@api.route("/api/users/<int:user_id>", methods=["PUT"])
+@admin_required
+def api_update_user(user_id):
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+        return jsonify({"success": False, "error": "Invalid JSON payload"}), 400
+
+    kwargs = {}
+    if "password" in data:
+        kwargs["password"] = str(data.get("password") or "")
+    if "role" in data:
+        kwargs["role"] = str(data.get("role") or "")
+    if "is_active" in data:
+        kwargs["is_active"] = bool(data.get("is_active"))
+
+    result = update_user(user_id, **kwargs)
+    if not result.get("success"):
+        status = 404 if result.get("error") == "User not found" else 400
+        return jsonify(result), status
+    return jsonify(result)
+
+
+@api.route("/api/users/<int:user_id>", methods=["DELETE"])
+@admin_required
+def api_delete_user(user_id):
+    if session_user_id() is not None and session_user_id() == user_id:
+        return jsonify({"success": False, "error": "Cannot delete your own account"}), 400
+
+    result = delete_user(user_id)
+    if not result.get("success"):
+        status = 404 if result.get("error") == "User not found" else 400
+        return jsonify(result), status
+    return jsonify(result)
 
 
 @api.route("/print", methods=["POST"])
