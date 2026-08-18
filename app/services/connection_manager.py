@@ -18,6 +18,9 @@ from app.utils.logger import log
 
 CONNECT_TIMEOUT = float(os.getenv("PRINTER_CONNECT_TIMEOUT", "5"))
 READ_TIMEOUT = float(os.getenv("PRINTER_READ_TIMEOUT", "5"))
+# How long an HTTP worker may wait for the per-printer lock.
+# Short default avoids Waitress thread exhaustion when ERP floods RQLP polls.
+LOCK_TIMEOUT = float(os.getenv("PRINTER_LOCK_TIMEOUT", "2"))
 # Simple middleware mode: do not wait for printer read/ack by default.
 # Set PRINTER_FIRE_AND_FORGET=false if you need to wait for device response.
 FIRE_AND_FORGET = os.getenv("PRINTER_FIRE_AND_FORGET", "false").lower() == "true"
@@ -118,6 +121,11 @@ def _classify_result(
     protocol_error_code = result.get("protocol_error_code")
     fields = result.get("response_fields") or []
 
+    if result.get("error_type") == "printer_busy":
+        result["ok"] = False
+        result["reason"] = result.get("reason") or "Printer busy"
+        return result
+
     if result.get("error_type") in {"read_timeout", "empty_response"} and REQUIRE_PRINTER_RESPONSE:
         result["ok"] = False
         result["reason"] = result.get("reason") or "No response received from printer"
@@ -183,11 +191,32 @@ class ConnectionManager:
         self.lock = threading.Lock()
         self._sock: Optional[socket.socket] = None
 
+    def _enable_keepalive(self, sock: socket.socket) -> None:
+        """Detect a powered-off printer without waiting for the next print."""
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+            if hasattr(socket, "SIO_KEEPALIVE_VALS"):
+                # Windows: enable, idle ms, interval ms.
+                sock.ioctl(socket.SIO_KEEPALIVE_VALS, (1, 5000, 1000))
+                return
+            idle = getattr(socket, "TCP_KEEPIDLE", None)
+            interval = getattr(socket, "TCP_KEEPINTVL", None)
+            count = getattr(socket, "TCP_KEEPCNT", None)
+            if idle is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, idle, 5)
+            if interval is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, interval, 1)
+            if count is not None:
+                sock.setsockopt(socket.IPPROTO_TCP, count, 3)
+        except OSError as exc:
+            log(f"Could not enable TCP keepalive for {self.printer_id}: {exc}")
+
     def _open_socket(self) -> socket.socket:
         sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         sock.settimeout(CONNECT_TIMEOUT)
         sock.connect((self.ip, self.port))
         sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+        self._enable_keepalive(sock)
         self.connected = True
         return sock
 
@@ -206,35 +235,52 @@ class ConnectionManager:
             log(f"Opened persistent connection for {self.printer_id} -> {self.ip}:{self.port}")
         return self._sock
 
-    def send_command(self, command_dict: Dict[str, Any]) -> Dict[str, Any]:
+    def send_command(
+        self,
+        command_dict: Dict[str, Any],
+        lock_timeout: Optional[float] = None,
+    ) -> Dict[str, Any]:
         """Send one command and return detailed response diagnostics.
 
         Raises socket errors on network/transport failures; caller decides retry
         policy. Protocol-level failures (timeout, NYES, SYSN, etc.) are
         returned as structured unsuccessful results so callers can persist exact
         device feedback.
+
+        If the printer lock cannot be acquired within lock_timeout seconds,
+        returns a busy result immediately so HTTP workers are not piled up.
         """
-        with self.lock:
-            command_dict = normalize_single_command(command_dict)
+        wait = LOCK_TIMEOUT if lock_timeout is None else lock_timeout
+        command_dict = normalize_single_command(command_dict)
 
-            result: Dict[str, Any] = {
-                "timestamp": datetime.now().isoformat(),
-                "target_ip": self.ip,
-                "target_port": self.port,
-                "request_command": command_dict.get("command"),
-                "request_payload": command_dict,
-                "ok": False,
-                "reason": None,
-                "error_type": None,
-                "raw_response": None,
-                "response": None,
-                "response_type": None,
-                "response_command": None,
-                "response_status": None,
-                "protocol_error_code": None,
-                "protocol_error_description": None,
-            }
+        result: Dict[str, Any] = {
+            "timestamp": datetime.now().isoformat(),
+            "target_ip": self.ip,
+            "target_port": self.port,
+            "request_command": command_dict.get("command"),
+            "request_payload": command_dict,
+            "ok": False,
+            "reason": None,
+            "error_type": None,
+            "raw_response": None,
+            "response": None,
+            "response_type": None,
+            "response_command": None,
+            "response_status": None,
+            "protocol_error_code": None,
+            "protocol_error_description": None,
+        }
 
+        acquired = self.lock.acquire(timeout=max(0.0, wait))
+        if not acquired:
+            result["error_type"] = "printer_busy"
+            result["reason"] = (
+                f"Printer {self.printer_id} busy (lock wait > {wait}s); try again"
+            )
+            log(f"Printer busy, dropping queued command for {self.printer_id}")
+            return _classify_result(result)
+
+        try:
             try:
                 sock = self._ensure_socket()
                 payload = serialize_command(command_dict)
@@ -250,6 +296,8 @@ class ConnectionManager:
                 try:
                     data = sock.recv(4096)
                 except socket.timeout:
+                    # Drop the socket so a late reply cannot corrupt the next command.
+                    self._close_socket()
                     result["error_type"] = "read_timeout"
                     result["reason"] = f"Printer read timeout after {READ_TIMEOUT}s"
                     log(f"Read timeout from printer {self.printer_id}")
@@ -282,10 +330,53 @@ class ConnectionManager:
                 self._close_socket()
                 log(f"Send error for {self.printer_id}: {e}")
                 raise
+        finally:
+            self.lock.release()
 
     def close(self):
         self._close_socket()
         log(f"Closed connection for {self.printer_id}")
+
+    def probe_alive(self) -> bool:
+        """Return whether the cached socket is still open. Does not connect.
+
+        A printer power-off often sends no TCP FIN, so this only catches a
+        clean close, RST, or keepalive failure. Half-open sockets stay True
+        until keepalive (about 5–8s) or the next send.
+        """
+        if not self.lock.acquire(timeout=0.2):
+            return bool(self.connected and self._sock is not None)
+
+        try:
+            sock = self._sock
+            if sock is None:
+                self.connected = False
+                return False
+
+            try:
+                sock.settimeout(0)
+                data = sock.recv(1, socket.MSG_PEEK)
+                if not data:
+                    self._close_socket()
+                    log(f"Printer {self.printer_id} closed TCP connection")
+                    return False
+                self.connected = True
+                return True
+            except (BlockingIOError, socket.timeout):
+                self.connected = True
+                return True
+            except OSError as exc:
+                log(f"Printer {self.printer_id} socket dead: {exc}")
+                self._close_socket()
+                return False
+            finally:
+                try:
+                    if self._sock is not None:
+                        self._sock.settimeout(READ_TIMEOUT)
+                except Exception:
+                    pass
+        finally:
+            self.lock.release()
 
     def update_target(self, ip: str, port: int):
         with self.lock:

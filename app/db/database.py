@@ -1,3 +1,4 @@
+import os
 import sqlite3
 import json
 from datetime import datetime
@@ -44,6 +45,18 @@ class DatabaseManager:
             ''')
 
             conn.execute('''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    username TEXT NOT NULL UNIQUE COLLATE NOCASE,
+                    password_hash TEXT NOT NULL,
+                    role TEXT NOT NULL DEFAULT 'operator',
+                    is_active INTEGER NOT NULL DEFAULT 1,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL
+                )
+            ''')
+
+            conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_jobs_status ON jobs(status)
             ''')
             conn.execute('''
@@ -51,6 +64,9 @@ class DatabaseManager:
             ''')
             conn.execute('''
                 CREATE INDEX IF NOT EXISTS idx_jobs_next_retry ON jobs(next_retry_at)
+            ''')
+            conn.execute('''
+                CREATE INDEX IF NOT EXISTS idx_users_username ON users(username)
             ''')
 
     @contextmanager

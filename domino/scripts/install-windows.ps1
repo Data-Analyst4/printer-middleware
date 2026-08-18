@@ -61,8 +61,9 @@ function Read-EnvFile([string]$Path) {
 }
 
 function Find-Python {
+    $pythonCmd = Get-Command python -ErrorAction SilentlyContinue
     $candidates = @(
-        (Get-Command python -ErrorAction SilentlyContinue)?.Source,
+        $(if ($pythonCmd) { $pythonCmd.Source } else { $null }),
         "$env:LOCALAPPDATA\Programs\Python\Python311\python.exe",
         "$env:LOCALAPPDATA\Programs\Python\Python312\python.exe",
         "C:\Program Files\Python311\python.exe",
@@ -295,7 +296,7 @@ Write-Host "  Local:    http://127.0.0.1:$port/health"
 Write-Host "  Test:     POST http://127.0.0.1:$port/test/connection"
 Write-Host ""
 Write-Host "  NEXT: edit config\printers.json with real Domino IP, then:"
-Write-Host "    curl -X POST http://127.0.0.1:$port/test/connection -H ""Content-Type: application/json"" -d ""{\""ip\"":\""DOMINO_IP\"",\""port\"":7000}"""
+Write-Host ('    curl -X POST http://127.0.0.1:{0}/test/connection -H "Content-Type: application/json" -d "{{\"ip\":\"DOMINO_IP\",\"port\":7000}}"' -f $port)
 Write-Host ""
 Write-Host "  Useful:"
 Write-Host "    sc query $ServiceName"
