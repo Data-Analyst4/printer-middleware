@@ -36,6 +36,8 @@ CAMERA_IMPORT_ENABLED = os.getenv("CAMERA_IMPORT_ENABLED", "true").lower() == "t
 CAMERA_IMPORT_TIMEOUT = float(os.getenv("CAMERA_IMPORT_TIMEOUT", "3"))
 # immediate = POST before printer send (default). rqlp = legacy after-print confirm.
 CAMERA_IMPORT_FLOW = os.getenv("CAMERA_IMPORT_FLOW", "immediate").strip().lower()
+# v1.3.0: POST camera in a background thread so HTTP timeout cannot delay printer TCP.
+CAMERA_IMPORT_ASYNC = os.getenv("CAMERA_IMPORT_ASYNC", "true").lower() == "true"
 RQLP_MAX_ATTEMPTS = max(1, int(os.getenv("CAMERA_RQLP_MAX_ATTEMPTS", "3")))
 RQLP_RETRY_DELAY_S = float(os.getenv("CAMERA_RQLP_RETRY_DELAY_S", "0.15"))
 
@@ -67,12 +69,18 @@ def build_text_from_col_data(col_data: Dict[str, Any]) -> str:
     return "".join(str(col_data[k] if col_data[k] is not None else "") for k in keys)
 
 
-def parse_rqlp_result(command_result: Dict[str, Any]) -> Dict[str, Any]:
+def parse_rqlp_result(
+    command_result: Dict[str, Any],
+    allow_zero: bool = False,
+) -> Dict[str, Any]:
     """
     Parse middleware/printer RQLP (RSFP) response.
 
     Returns:
       success, printed_count, total_count, col_data, value_str, reason
+
+    allow_zero: if True, printed_count 0 is a successful parse (bulk leftover math).
+    Camera confirm still defaults to requiring at least one printed label.
     """
     out: Dict[str, Any] = {
         "success": False,
@@ -132,7 +140,7 @@ def parse_rqlp_result(command_result: Dict[str, Any]) -> Dict[str, Any]:
     out["total_count"] = total_count
     out["col_data"] = col_data
 
-    if printed_count < 1:
+    if printed_count < 1 and not allow_zero:
         out["reason"] = f"Printer reports no labels printed yet ({value_str})"
         return out
 
@@ -263,6 +271,85 @@ def forward_camera_import_immediate(
         printer_id=printer_id,
         extra_data={"camera_import": meta},
     )
+    return meta
+
+
+def start_camera_import_immediate(
+    job_id: str,
+    request_data: Dict[str, Any],
+    pod_data: Optional[Dict[str, Any]],
+    *,
+    printer_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Same as immediate camera import, but HTTP POST runs in a background thread.
+
+    /print returns immediately with status=sending. Camera HTTP failures are logged
+    asynchronously and are not included in the print response.
+    """
+    url, barcode = resolve_camera_target(request_data)
+    meta: Dict[str, Any] = {
+        "attempted": False,
+        "flow": "immediate_async",
+        "camera_ok": None,
+        "url": url,
+        "barcode": barcode if barcode is not None else "",
+        "missing_barcode": False,
+        "erp_alert_recommended": False,
+        "alert_reasons": [],
+        "status": "skipped",
+        "reason": None,
+        "text_source": "sent_pod",
+        "text_length": 0,
+    }
+
+    if url is None:
+        meta["reason"] = "camera_import not enabled"
+        return meta
+
+    missing_barcode = not bool(barcode)
+    meta["missing_barcode"] = missing_barcode
+    meta["attempted"] = True
+    if missing_barcode:
+        meta["alert_reasons"].append("empty_barcode")
+        meta["erp_alert_recommended"] = True
+
+    text = build_pod_string(pod_data if isinstance(pod_data, dict) else {})
+    meta["text_length"] = len(text)
+    if not text:
+        meta["status"] = "no_text"
+        meta["reason"] = "no POD text available for camera"
+        log(
+            meta["reason"],
+            level="ERROR",
+            job_id=job_id,
+            printer_id=printer_id,
+            extra_data={"camera_import": meta},
+        )
+        return meta
+
+    def _run() -> None:
+        camera_result = post_camera_import(url, barcode or "", text)
+        level = "INFO" if camera_result.get("ok") else "ERROR"
+        log(
+            (
+                f"Immediate camera import "
+                f"{'succeeded' if camera_result.get('ok') else 'failed'} "
+                f"barcode={barcode or '(empty)'} text_len={len(text)} url={url}"
+            ),
+            level=level,
+            job_id=job_id,
+            printer_id=printer_id,
+            extra_data={"camera_import": camera_result},
+        )
+
+    threading.Thread(
+        target=_run,
+        daemon=True,
+        name=f"camera-import-{job_id[:8]}",
+    ).start()
+
+    meta["status"] = "sending"
+    meta["reason"] = "Camera POST started in background"
     return meta
 
 

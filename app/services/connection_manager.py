@@ -21,9 +21,15 @@ READ_TIMEOUT = float(os.getenv("PRINTER_READ_TIMEOUT", "5"))
 # How long an HTTP worker may wait for the per-printer lock.
 # Short default avoids Waitress thread exhaustion when ERP floods RQLP polls.
 LOCK_TIMEOUT = float(os.getenv("PRINTER_LOCK_TIMEOUT", "2"))
-# Simple middleware mode: do not wait for printer read/ack by default.
-# Set PRINTER_FIRE_AND_FORGET=false if you need to wait for device response.
+# Global: skip recv for every command. Default off so STAR/STOP/MON still ACK.
 FIRE_AND_FORGET = os.getenv("PRINTER_FIRE_AND_FORGET", "false").lower() == "true"
+# v1.3.0: DATA does not wait for printer ACK (that 5s recv was the slow path).
+DATA_FIRE_AND_FORGET = os.getenv("PRINTER_DATA_FIRE_AND_FORGET", "true").lower() == "true"
+FIRE_AND_FORGET_COMMANDS = {
+    part.strip().upper()
+    for part in os.getenv("PRINTER_FIRE_AND_FORGET_COMMANDS", "DATA").split(",")
+    if part.strip()
+}
 
 # If enabled, a command without printer reply is treated as an unsuccessful
 # attempt so retry/failure logic can surface the real root cause.
@@ -182,6 +188,30 @@ def _classify_result(
     return result
 
 
+def _skip_recv_for(command_name: str) -> bool:
+    name = (command_name or "").upper()
+    if FIRE_AND_FORGET:
+        return True
+    return DATA_FIRE_AND_FORGET and name in FIRE_AND_FORGET_COMMANDS
+
+
+def _drain_pending(sock: socket.socket) -> None:
+    """Drop leftover ACKs so the next wait-for-response command is not mixed."""
+    try:
+        sock.setblocking(False)
+        while True:
+            chunk = sock.recv(4096)
+            if not chunk:
+                break
+    except (BlockingIOError, socket.timeout, OSError):
+        pass
+    finally:
+        try:
+            sock.setblocking(True)
+        except OSError:
+            pass
+
+
 class ConnectionManager:
     def __init__(self, printer_id: str, ip: str, port: int):
         self.printer_id = printer_id
@@ -208,6 +238,11 @@ class ConnectionManager:
             self._sock = None
         self.connected = False
 
+    def force_reconnect(self) -> None:
+        """Drop a stuck TCP session so the next send opens a new socket."""
+        with self.lock:
+            self._close_socket()
+
     def _ensure_socket(self) -> socket.socket:
         if self._sock is None:
             self._sock = self._open_socket()
@@ -218,6 +253,7 @@ class ConnectionManager:
         self,
         command_dict: Dict[str, Any],
         lock_timeout: Optional[float] = None,
+        wait_for_ack: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Send one command and return detailed response diagnostics.
 
@@ -266,11 +302,14 @@ class ConnectionManager:
                 sock.sendall(payload)
                 result["request_bytes"] = len(payload)
 
-                if FIRE_AND_FORGET:
+                cmd_name = str(command_dict.get("command") or "").upper()
+                skip_recv = _skip_recv_for(cmd_name) if wait_for_ack is None else (not wait_for_ack)
+                if skip_recv:
                     result["ok"] = True
-                    result["reason"] = "Sent in fire-and-forget mode"
-                    return result
+                    result["reason"] = f"Sent without waiting for printer ACK ({cmd_name})"
+                    return _classify_result(result)
 
+                _drain_pending(sock)
                 sock.settimeout(READ_TIMEOUT)
                 try:
                     data = sock.recv(4096)

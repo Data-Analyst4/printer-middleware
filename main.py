@@ -10,6 +10,12 @@ from datetime import timedelta
 from flask import Flask
 from flask_cors import CORS
 from dotenv import load_dotenv
+
+# Load site.env before importing app modules so PRINTER_* / CAMERA_* defaults apply.
+_ROOT_DIR = os.path.dirname(os.path.abspath(__file__))
+load_dotenv(os.path.join(_ROOT_DIR, "config", "site.env"))
+load_dotenv(os.path.join(_ROOT_DIR, ".env"), override=True)
+
 from app.api.routes import api
 from app.version import get_version, get_version_info
 from app.services.user_manager import count_users, ensure_seed_admin
