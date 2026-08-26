@@ -67,12 +67,17 @@ def build_text_from_col_data(col_data: Dict[str, Any]) -> str:
     return "".join(str(col_data[k] if col_data[k] is not None else "") for k in keys)
 
 
-def parse_rqlp_result(command_result: Dict[str, Any]) -> Dict[str, Any]:
+def parse_rqlp_result(
+    command_result: Dict[str, Any],
+    allow_zero: bool = False,
+) -> Dict[str, Any]:
     """
     Parse middleware/printer RQLP (RSFP) response.
 
     Returns:
       success, printed_count, total_count, col_data, value_str, reason
+
+    allow_zero: if True, printed_count 0 is a successful parse (bulk leftover math).
     """
     out: Dict[str, Any] = {
         "success": False,
@@ -132,7 +137,7 @@ def parse_rqlp_result(command_result: Dict[str, Any]) -> Dict[str, Any]:
     out["total_count"] = total_count
     out["col_data"] = col_data
 
-    if printed_count < 1:
+    if printed_count < 1 and not allow_zero:
         out["reason"] = f"Printer reports no labels printed yet ({value_str})"
         return out
 

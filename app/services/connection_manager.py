@@ -229,6 +229,11 @@ class ConnectionManager:
             self._sock = None
         self.connected = False
 
+    def force_reconnect(self) -> None:
+        """Drop a stuck TCP session so the next send opens a new socket."""
+        with self.lock:
+            self._close_socket()
+
     def _ensure_socket(self) -> socket.socket:
         if self._sock is None:
             self._sock = self._open_socket()
@@ -239,6 +244,7 @@ class ConnectionManager:
         self,
         command_dict: Dict[str, Any],
         lock_timeout: Optional[float] = None,
+        wait_for_ack: Optional[bool] = None,
     ) -> Dict[str, Any]:
         """Send one command and return detailed response diagnostics.
 
@@ -287,7 +293,8 @@ class ConnectionManager:
                 sock.sendall(payload)
                 result["request_bytes"] = len(payload)
 
-                if FIRE_AND_FORGET:
+                skip_recv = FIRE_AND_FORGET if wait_for_ack is None else (not wait_for_ack)
+                if skip_recv:
                     result["ok"] = True
                     result["reason"] = "Sent in fire-and-forget mode"
                     return result

@@ -34,6 +34,7 @@ from app.utils.auth import (
     session_user_id,
     verify_dashboard_credentials,
 )
+from app.utils.logger import log_erp_request
 
 api = Blueprint("api", __name__)
 
@@ -209,6 +210,7 @@ def api_delete_user(user_id):
 @api.route("/print", methods=["POST"])
 def print_label():
     data = request.json
+    log_erp_request(data)
     result = handle_print_request(data)
     return jsonify(result)
 

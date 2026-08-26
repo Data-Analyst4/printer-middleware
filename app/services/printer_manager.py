@@ -3,7 +3,7 @@ import os
 import threading
 import uuid
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, Optional
 
 from app.services.connection_manager import ConnectionManager
 from app.services.camera_import_forwarder import (
@@ -14,6 +14,12 @@ from app.services.camera_import_forwarder import (
 )
 from app.services.pod_device_manager import resolve_pod_target
 from app.services.pod_forwarder import build_pod_string, forward_pod_async, should_forward_pod
+from app.services.batch_queue import (
+    active_job_id,
+    cancel_printer_batch,
+    handle_batch_print,
+    is_bulk_payload,
+)
 from app.services.printer_protocol import extract_single_command
 from app.utils.logger import log
 from app.utils.validator import validate_request
@@ -92,14 +98,22 @@ def _lock_timeout_for_command(command: Dict[str, Any]) -> float:
     return float(os.getenv("PRINTER_DATA_LOCK_TIMEOUT", "15"))
 
 
-def _send_command(printer_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
+def _send_command(
+    printer_id: str,
+    command: Dict[str, Any],
+    wait_for_ack: Optional[bool] = None,
+) -> Dict[str, Any]:
     printer = PRINTERS[printer_id]
     connection: ConnectionManager = printer["connection"]
     lock_timeout = _lock_timeout_for_command(command)
 
     for attempt in range(1, SEND_RETRIES + 1):
         try:
-            response = connection.send_command(command, lock_timeout=lock_timeout)
+            response = connection.send_command(
+                command,
+                lock_timeout=lock_timeout,
+                wait_for_ack=wait_for_ack,
+            )
             result = {
                 "attempt": attempt,
                 "command": command,
@@ -152,6 +166,9 @@ def _send_command(printer_id: str, command: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
+    if is_bulk_payload(data):
+        return handle_batch_print(data)
+
     valid, error = validate_request(data)
     if not valid:
         return {"success": False, "error": error}
@@ -166,8 +183,27 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
     except ValueError as exc:
         return {"success": False, "error": str(exc)}
 
+    cmd_name = str(command.get("command", "")).upper()
+    if cmd_name != "STOP":
+        bulk_id = active_job_id(str(printer_id))
+        if bulk_id:
+            return {
+                "success": False,
+                "status": "rejected",
+                "error": (
+                    f"Bulk job {bulk_id} is running. Poll GET /job/{bulk_id}. "
+                    "Only STOP is allowed until it finishes."
+                ),
+                "job_id": bulk_id,
+                "active_job_id": bulk_id,
+            }
+
     register_printer(printer_id, ip, port)
     save_printers()
+
+    batch_cancel_meta = None
+    if cmd_name == "STOP":
+        batch_cancel_meta = cancel_printer_batch(printer_id)
 
     log(
         f"Direct send request {job_id}: printer={printer_id} target={ip}:{port} "
@@ -203,9 +239,7 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
                     printer_id=printer_id,
                 )
 
-    # Default (v1.2.0): camera POST before printer send. Legacy RQLP after ACK.
     camera_import_meta = None
-    cmd_name = str(command.get("command", "")).upper()
     camera_flow = get_camera_import_flow()
     if cmd_name == "DATA" and camera_flow == "immediate":
         cam_url, _cam_barcode = resolve_camera_target(data)
@@ -274,6 +308,11 @@ def handle_print_request(data: Dict[str, Any]) -> Dict[str, Any]:
 
     if camera_import_meta:
         result["camera_import"] = camera_import_meta
+
+    if batch_cancel_meta:
+        result["batch_cancelled"] = batch_cancel_meta.get("batch_cancelled")
+        result["cancelled_job_id"] = batch_cancel_meta.get("cancelled_job_id")
+        result["cancelled_remaining"] = batch_cancel_meta.get("cancelled_remaining")
 
     _store_result(result)
     return result

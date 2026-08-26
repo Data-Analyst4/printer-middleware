@@ -5,6 +5,34 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.1] - 2026-08-26 — Bulk resume on timeout/NYES
+
+### Added
+- `PRINT_BULK_RESUME` (default on): after a timeout, NYES, or TCP drop, keep the same bulk job running
+- Recovery path: **RQLP first** (STAR can reset printed count), leftover = plan − printed, then STAR, then send leftover
+- Soft TCP retries the same DATA 2–3 times before RQLP recovery
+- `GET /job/{id}` fields: `rqlp_printed`, `leftover`, `recoveries`
+- While a bulk job is `queued`/`running`, ERP `STAR`/`DATA`/`RQLP` are rejected; poll `GET /job/{id}`; `STOP` still allowed
+
+### Unchanged
+- STOP, RSAL 011 (invalid version), and FULL still hard-stop the job (no leftover loop)
+- Chunk size 30, no `camera_import` on bulk
+- Set `PRINT_BULK_RESUME=false` to restore fail-fast drain
+
+## [1.4.0] - 2026-08-20 — Bulk Mode A (pod_data + count)
+
+### Added
+- `POST /print` with `pod_data` + `count` queues the same POD × N and returns immediately (`execution_mode: batch`)
+- Background drain sends DATA in chunks of 30 and waits for printer ACK
+- `GET /job/{job_id}` reports `sent_to_printer` and batch status
+- STOP cancels any in-progress bulk drain then stops the printer
+
+## [1.3.0] - 2026-08-20 — Fast DATA send
+
+### Changed
+- DATA commands are written to the printer without waiting for a 5s ACK (`PRINTER_DATA_FIRE_AND_FORGET`)
+- Camera import POST runs in a background thread so a dead camera cannot delay print
+
 ## [1.2.0] - 2026-07-11 — Immediate camera import
 
 ### Added
@@ -83,22 +111,3 @@ This project uses [Semantic Versioning](https://semver.org/):
 3. Create git tag: `git tag -a v1.1.0 -m "Version 1.1.0"`
 4. Push tags: `git push origin --tags`
 5. Create GitHub release with release notes
-
-### Downloading Specific Versions
-
-#### Via Git Tags
-```bash
-# Download specific version
-git clone --branch v1.1.0 https://github.com/yourusername/printer-middleware.git
-
-# Or checkout specific version
-git checkout tags/v1.1.0
-```
-
-#### Via GitHub Releases
-Download ZIP files from [GitHub Releases](https://github.com/yourusername/printer-middleware/releases)
-
-#### Via pip (if published)
-```bash
-pip install printer-middleware==1.1.0
-```
